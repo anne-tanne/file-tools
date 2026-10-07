@@ -3,10 +3,11 @@ import ImageIO
 import PDFKit
 import SwiftUI
 
-enum Tool: String, CaseIterable, Identifiable {
+enum Tool: String, CaseIterable, Identifiable, Titled {
     case convert = "Convert", compress = "Compress", resize = "Resize"
     case rotate = "Rotate", strip = "Remove Info", rename = "Rename"
-    case combine = "Combine to PDF", split = "Split PDF"
+    case combine = "Combine to PDF", split = "Split PDF", reorder = "Reorder Pages"
+    case extractImages = "Extract Images"
     var id: String { rawValue }
 
     var icon: String {
@@ -19,18 +20,22 @@ enum Tool: String, CaseIterable, Identifiable {
         case .rename: "character.cursor.ibeam"
         case .combine: "doc.on.doc"
         case .split: "scissors"
+        case .reorder: "rectangle.2.swap"
+        case .extractImages: "photo.on.rectangle.angled"
         }
     }
     var subtitle: String {
         switch self {
-        case .convert: "Turn photos into another format, or PDF pages into images"
-        case .compress: "Make photos and PDFs smaller while keeping them sharp"
-        case .resize: "Scale photos down to a given size"
-        case .rotate: "Turn photos or PDF pages"
-        case .strip: "Remove camera, date and location info before sharing"
-        case .rename: "Give a set of files consistent, numbered names"
-        case .combine: "Put photos and PDFs together into one PDF"
-        case .split: "Take pages out of a PDF or cut it into parts"
+        case .convert: tr("Turn photos into another format, or PDF pages into images")
+        case .compress: tr("Make photos and PDFs smaller while keeping them sharp")
+        case .resize: tr("Scale photos down to a given size")
+        case .rotate: tr("Turn photos or PDF pages")
+        case .strip: tr("Remove camera, date and location info before sharing")
+        case .rename: tr("Give a set of files consistent, numbered names")
+        case .combine: tr("Put photos and PDFs together into one PDF")
+        case .split: tr("Take pages out of a PDF or cut it into parts")
+        case .reorder: tr("Drag PDF pages into a new order")
+        case .extractImages: tr("Save the pictures inside a PDF as separate image files")
         }
     }
     var action: String {
@@ -38,18 +43,20 @@ enum Tool: String, CaseIterable, Identifiable {
         case .strip: "Remove Info"
         case .combine: "Create PDF"
         case .split: "Split"
+        case .reorder: "Save"
+        case .extractImages: "Extract"
         default: rawValue
         }
     }
     func accepts(_ k: Kind) -> Bool {
         switch self {
         case .resize: k == .image
-        case .split: k == .pdf
+        case .split, .reorder, .extractImages: k == .pdf
         default: true
         }
     }
     /// Tools where the PDF page selection matters
-    var usesPages: Bool { self == .convert || self == .rotate || self == .split }
+    var usesPages: Bool { self == .convert || self == .rotate || self == .split || self == .extractImages }
     var writesFiles: Bool { self != .rename }
 }
 
@@ -60,14 +67,26 @@ struct Item: Identifiable {
     var pageCount = 1
     var date = Date.distantPast
     var selected: Set<Int> = []      // PDF: 0-based pages; empty = all pages
-    var status = "Ready"
+    var parts: [[Int]] = []          // Split selected pages: sorted pages of each new PDF
+    var partNames: [String] = []     // optional file name per part, "" = default name
+    var status = tr("Ready")
     var done = false
     var failed = false
     var output: URL? = nil           // compressed copy, for comparing
+    var order: [Int]? = nil          // Reorder: original 0-based pages in their new order; nil = unchanged
 
     var pages: [Int] { selected.isEmpty ? Array(0..<pageCount) : selected.sorted() }
     var pageSummary: String {
-        selected.isEmpty ? "All \(pageCount) pages" : "\(selected.count) of \(pageCount) pages"
+        selected.isEmpty ? tr("All %d pages", pageCount) : tr("%d of %d pages", selected.count, pageCount)
+    }
+    var partsSummary: String {
+        let used = parts.reduce(0) { $0 + $1.count }
+        return parts.isEmpty ? tr("No pages selected yet")
+            : (parts.count == 1 ? tr("1 PDF") : tr("%d PDFs", parts.count)) + " · " + tr("%d of %d pages", used, pageCount)
+    }
+    var orderSummary: String {
+        guard let order else { return tr("Original order") }
+        return tr("New order: ") + order.prefix(8).map { String($0 + 1) }.joined(separator: ", ") + (order.count > 8 ? " …" : "")
     }
 }
 
@@ -77,6 +96,8 @@ struct Job: Sendable {
     let url: URL
     let kind: Kind
     let pages: [Int]
+    var parts: [[Int]] = []
+    var partNames: [String] = []
 }
 
 struct Outcome: Sendable {
@@ -85,18 +106,40 @@ struct Outcome: Sendable {
     var compareWith: URL? = nil
 }
 
+/// Files and results of one tool; every tool keeps its own
+struct Workspace {
+    var items: [Item] = []
+    var summary: String? = nil
+    var summaryFailed = false
+    var lastOutputs: [URL] = []
+}
+
 @MainActor
 final class Model: ObservableObject {
-    @Published var items: [Item] = []
-    @Published var tool: Tool = .convert {
-        didSet { if tool != oldValue { resetStatus() } }
-    }
+    @Published private var spaces: [Tool: Workspace] = [:]
+    @Published var tool: Tool = .convert
     @Published var outputFolder: URL? = nil   // nil = next to the original
     @Published var busy = false
-    @Published var editing: Item.ID? = nil
+    @Published var focused: Item.ID? = nil   // PDF whose pages are shown below the list
     @Published var comparing: Item.ID? = nil
-    @Published var summary: String? = nil
-    @Published var lastOutputs: [URL] = []
+
+    var items: [Item] {
+        get { spaces[tool]?.items ?? [] }
+        set { spaces[tool, default: Workspace()].items = newValue }
+    }
+    var summary: String? {
+        get { spaces[tool]?.summary }
+        set { spaces[tool, default: Workspace()].summary = newValue; spaces[tool]?.summaryFailed = false }
+    }
+    /// Set after `summary`: shows it as an error
+    var summaryFailed: Bool {
+        get { spaces[tool]?.summaryFailed ?? false }
+        set { spaces[tool, default: Workspace()].summaryFailed = newValue }
+    }
+    var lastOutputs: [URL] {
+        get { spaces[tool]?.lastOutputs ?? [] }
+        set { spaces[tool, default: Workspace()].lastOutputs = newValue }
+    }
 
     // Convert
     @Published var format: OutFormat = .jpg
@@ -116,18 +159,29 @@ final class Model: ObservableObject {
     // Combine
     @Published var pageSize: PageSize = .a4
     @Published var pageMargin = true
-    @Published var combinedName = "Combined"
+    @Published var combinedName = tr("Combined")
     // Split
     @Published var splitMode: SplitMode = .extract
     @Published var chunkSize = 5
+    // Extract images
+    @Published var skipSmallImages = true
     // Rename
-    @Published var renamePattern = "Photo ###"
+    @Published var renamePattern = tr("Photo ###")
     @Published var renameStart = 1
     @Published var lastRename: [(from: URL, to: URL)] = []
 
     var hasPDF: Bool { items.contains { $0.kind == .pdf } }
+    var assignsParts: Bool { tool == .split && splitMode == .extract }
+    /// PDF whose page overview is shown: the clicked one, otherwise the first
+    var pageItem: Item? {
+        guard tool.usesPages || tool == .reorder else { return nil }
+        let pdfs = eligible.filter { $0.kind == .pdf }
+        return pdfs.first { $0.id == focused } ?? pdfs.first
+    }
     var eligible: [Item] { items.filter { tool.accepts($0.kind) } }
     var pending: [Item] { eligible.filter { !$0.done } }
+    var canRun: Bool { tool == .rename ? renameCount > 0 : !eligible.isEmpty }
+    func clearList() { items.removeAll(); summary = nil; lastRename = [] }
 
     // MARK: Files
 
@@ -185,7 +239,7 @@ final class Model: ObservableObject {
         p.canChooseFiles = false
         p.canChooseDirectories = true
         p.canCreateDirectories = true
-        p.prompt = "Choose"
+        p.prompt = tr("Choose")
         if p.runModal() == .OK { outputFolder = p.url }
     }
 
@@ -201,7 +255,7 @@ final class Model: ObservableObject {
 
     func resetStatus() {
         for i in items.indices {
-            items[i].status = "Ready"; items[i].done = false; items[i].failed = false; items[i].output = nil
+            items[i].status = tr("Ready"); items[i].done = false; items[i].failed = false; items[i].output = nil
         }
         summary = nil
         lastOutputs = []
@@ -229,9 +283,9 @@ final class Model: ObservableObject {
                     return Outcome(message: out.lastPathComponent, files: [out])
                 }
                 let outs = try PDFOps.toImages(job.url, pages: job.pages, to: fmt, quality: q, dpi: dpi, folder: folder) {
-                    progress("Page \($0) of \(job.pages.count)…")
+                    progress(tr("Page %d of %d…", $0, job.pages.count))
                 }
-                return Outcome(message: outs.count == 1 ? outs[0].lastPathComponent : "\(outs.count) images", files: outs)
+                return Outcome(message: outs.count == 1 ? outs[0].lastPathComponent : tr("%d images", outs.count), files: outs)
             }
         case .compress:
             let level = level
@@ -241,7 +295,7 @@ final class Model: ObservableObject {
                 let out = try Compressor.run(job.url, kind: job.kind, level: level, target: target, folder: folder, progress: progress)
                 let after = fileSize(out)
                 var msg = "\(fmtSize(before)) → \(fmtSize(after)) (−\(Int((Double(before - after) / Double(before) * 100).rounded())) %)"
-                if let target, after > target { msg += ", smallest possible" }
+                if let target, after > target { msg += tr(", smallest possible") }
                 return Outcome(message: msg, files: [out], compareWith: out)
             }
         case .resize:
@@ -269,8 +323,21 @@ final class Model: ObservableObject {
         case .split:
             let mode = splitMode, chunk = chunkSize
             runEach { job, _ in
-                let outs = try PDFOps.split(job.url, pages: job.pages, mode: mode, chunk: chunk, folder: folder)
-                return Outcome(message: outs.count == 1 ? outs[0].lastPathComponent : "\(outs.count) PDFs", files: outs)
+                let outs = try PDFOps.split(job.url, pages: job.pages, mode: mode, chunk: chunk, parts: job.parts, names: job.partNames, folder: folder)
+                return Outcome(message: outs.count == 1 ? outs[0].lastPathComponent : tr("%d PDFs", outs.count), files: outs)
+            }
+        case .reorder:
+            runEach { job, _ in
+                let out = try PDFOps.reorder(job.url, order: job.pages, folder: folder)
+                return Outcome(message: out.lastPathComponent, files: [out])
+            }
+        case .extractImages:
+            let skipSmall = skipSmallImages
+            runEach { job, progress in
+                let (dir, n) = try PDFImages.extract(job.url, pages: job.pages, skipSmall: skipSmall, folder: folder) {
+                    progress("Page \($0) of \(job.pages.count)…")
+                }
+                return Outcome(message: "\(n) image\(n == 1 ? "" : "s") in “\(dir.lastPathComponent)”", files: [dir])
             }
         case .combine: combine()
         case .rename: rename()
@@ -279,12 +346,16 @@ final class Model: ObservableObject {
 
     /// Runs `work` for every eligible file in the background, one after another
     private func runEach(_ work: @escaping @Sendable (Job, @escaping @Sendable (String) -> Void) throws -> Outcome) {
-        let jobs = pending.map { Job(id: $0.id, url: $0.url, kind: $0.kind, pages: $0.pages) }
+        let reorder = tool == .reorder
+        let jobs = pending.map {
+            Job(id: $0.id, url: $0.url, kind: $0.kind,
+                pages: reorder ? $0.order ?? Array(0..<$0.pageCount) : $0.pages, parts: $0.parts, partNames: $0.partNames)
+        }
         guard !jobs.isEmpty else { return }
         busy = true
         Task.detached {
             for job in jobs {
-                await MainActor.run { self.update(job.id) { $0.status = "Working…" } }
+                await MainActor.run { self.update(job.id) { $0.status = tr("Working…") } }
                 let progress: @Sendable (String) -> Void = { msg in
                     Task { @MainActor in self.update(job.id) { if !$0.done && !$0.failed { $0.status = msg } } }
                 }
@@ -298,7 +369,7 @@ final class Model: ObservableObject {
                         case .failure(let e as Skipped):
                             $0.status = e.localizedDescription; $0.done = true
                         case .failure(let e):
-                            $0.status = "Error: " + e.localizedDescription; $0.failed = true
+                            $0.status = tr("Error: ") + e.localizedDescription; $0.failed = true
                         }
                     }
                 }
@@ -312,28 +383,28 @@ final class Model: ObservableObject {
     private func combine() {
         let parts = eligible
         guard !parts.isEmpty else { return }
-        let name = combinedName.trimmingCharacters(in: .whitespaces).isEmpty ? "Combined" : combinedName
+        let name = combinedName.trimmingCharacters(in: .whitespaces).isEmpty ? tr("Combined") : combinedName
         let out = uniqueURL(outputFolder ?? parts[0].url.deletingLastPathComponent(), name, "pdf")
         let entries = parts.map { (url: $0.url, kind: $0.kind) }
         let pageSize = pageSize, margin = pageMargin
-        for p in parts { update(p.id) { $0.status = "Waiting…"; $0.done = false; $0.failed = false } }
+        for p in parts { update(p.id) { $0.status = tr("Waiting…"); $0.done = false; $0.failed = false } }
         busy = true
         Task.detached {
             let result = Result {
                 try PDFOps.combine(entries, pageSize: pageSize, margin: margin, to: out) { n in
                     let id = parts[n - 1].id
-                    Task { @MainActor in self.update(id) { $0.status = "Adding…" } }
+                    Task { @MainActor in self.update(id) { $0.status = tr("Adding…") } }
                 }
             }
             await MainActor.run {
                 switch result {
                 case .success(let pages):
-                    for p in parts { self.update(p.id) { $0.status = "✓ Added"; $0.done = true } }
-                    self.summary = "Created “\(out.lastPathComponent)”: \(pages) pages, \(fmtSize(fileSize(out)))"
+                    for p in parts { self.update(p.id) { $0.status = "✓ " + tr("Added"); $0.done = true } }
+                    self.summary = tr("Created “%@”: %d pages, %@", out.lastPathComponent, pages, fmtSize(fileSize(out)))
                     self.lastOutputs = [out]
                 case .failure(let e):
-                    for p in parts { self.update(p.id) { $0.status = "Ready" } }
-                    self.summary = "Error: " + e.localizedDescription
+                    for p in parts { self.update(p.id) { $0.status = tr("Ready") } }
+                    self.summary = tr("Error: ") + e.localizedDescription; self.summaryFailed = true
                 }
                 self.busy = false
             }
@@ -408,8 +479,8 @@ final class Model: ObservableObject {
         for m in moves {
             let t = m.to.path.lowercased()
             if targets.contains(t) || (FileManager.default.fileExists(atPath: m.to.path) && !sources.contains(t)) {
-                update(m.id) { $0.status = "Error: “\(m.to.lastPathComponent)” already exists"; $0.failed = true }
-                summary = "Nothing renamed: a file with one of the new names already exists"
+                update(m.id) { $0.status = tr("Error: ") + tr("“%@” already exists", m.to.lastPathComponent); $0.failed = true }
+                summary = tr("Nothing renamed: a file with one of the new names already exists"); summaryFailed = true
                 return
             }
             targets.insert(t)
@@ -417,15 +488,15 @@ final class Model: ObservableObject {
         do {
             try Self.moveAll(moves.map { ($0.from, $0.to) })
         } catch {
-            summary = "Nothing renamed: " + error.localizedDescription
+            summary = tr("Nothing renamed: ") + error.localizedDescription; summaryFailed = true
             return
         }
         for m in moves {
-            update(m.id) { $0.url = m.to; $0.status = "✓ was “\(m.from.lastPathComponent)”"; $0.done = true; $0.failed = false }
+            update(m.id) { $0.url = m.to; $0.status = tr("✓ was “%@”", m.from.lastPathComponent); $0.done = true; $0.failed = false }
         }
         lastRename = moves.map { ($0.to, $0.from) }
         lastOutputs = moves.map { $0.to }
-        summary = "Renamed \(moves.count) file\(moves.count == 1 ? "" : "s")"
+        summary = moves.count == 1 ? tr("Renamed 1 file") : tr("Renamed %d files", moves.count)
     }
 
     func undoRename() {
@@ -433,16 +504,16 @@ final class Model: ObservableObject {
         do {
             try Self.moveAll(moves)
         } catch {
-            summary = "Undo failed: " + error.localizedDescription
+            summary = tr("Undo failed: ") + error.localizedDescription; summaryFailed = true
             return
         }
         for m in moves {
             if let i = items.firstIndex(where: { $0.url == m.from }) {
-                items[i].url = m.to; items[i].status = "Ready"; items[i].done = false
+                items[i].url = m.to; items[i].status = tr("Ready"); items[i].done = false
             }
         }
         lastRename = []
         lastOutputs = []
-        summary = "Original names restored"
+        summary = tr("Original names restored")
     }
 }

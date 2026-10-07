@@ -7,7 +7,7 @@ enum ImageOps {
 
     static func source(_ url: URL) throws -> CGImageSource {
         guard let s = CGImageSourceCreateWithURL(url as CFURL, nil), CGImageSourceGetCount(s) > 0 else {
-            throw ConvError("File can't be read")
+            throw ConvError(tr("File can't be read"))
         }
         return s
     }
@@ -52,12 +52,12 @@ enum ImageOps {
 
     static func write(_ out: URL, type: CFString, _ add: (CGImageDestination) -> Void) throws {
         guard let d = CGImageDestinationCreateWithURL(out as CFURL, type, 1, nil) else {
-            throw ConvError("Can't write to destination")
+            throw ConvError(tr("Can't write to destination"))
         }
         add(d)
         guard CGImageDestinationFinalize(d) else {
             try? FileManager.default.removeItem(at: out)
-            throw ConvError("Writing failed")
+            throw ConvError(tr("Writing failed"))
         }
     }
 
@@ -73,7 +73,7 @@ enum ImageOps {
         guard let img = CGImageSourceCreateThumbnailAtIndex(s, 0, [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceThumbnailMaxPixelSize: maxEdge,
-        ] as CFDictionary) else { throw ConvError("File can't be read") }
+        ] as CFDictionary) else { throw ConvError(tr("File can't be read")) }
         p.merge(metadata(s)) { mine, _ in mine }
         try write(out, type: type) { CGImageDestinationAddImage($0, img, p as CFDictionary) }
     }
@@ -85,7 +85,7 @@ enum ImageOps {
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceThumbnailMaxPixelSize: max(w, h),
             kCGImageSourceCreateThumbnailWithTransform: true,
-        ] as CFDictionary) else { throw ConvError("File can't be read") }
+        ] as CFDictionary) else { throw ConvError(tr("File can't be read")) }
         return img
     }
 
@@ -123,13 +123,13 @@ enum ImageOps {
         } else if fmt == .jpg && hasAlpha(s) {
             // JPG has no transparency: put the image on white instead of black
             guard let img = CGImageSourceCreateImageAtIndex(s, 0, nil), let c = context(img.width, img.height, like: img) else {
-                throw ConvError("File can't be read")
+                throw ConvError(tr("File can't be read"))
             }
             let r = CGRect(x: 0, y: 0, width: img.width, height: img.height)
             c.setFillColor(.white)
             c.fill(r)
             c.draw(img, in: r)
-            guard let flat = c.makeImage() else { throw ConvError("File can't be read") }
+            guard let flat = c.makeImage() else { throw ConvError(tr("File can't be read")) }
             var p = metadata(s)
             p[kCGImageDestinationLossyCompressionQuality] = quality
             try write(out, type: type) { CGImageDestinationAddImage($0, flat, p as CFDictionary) }
@@ -154,14 +154,14 @@ enum ImageOps {
     static func resize(_ src: URL, mode: ResizeMode, value: Int, folder: URL?) throws -> (URL, Int, Int) {
         let s = try source(src)
         let (w, h) = displaySize(s)
-        guard w > 0, h > 0, value > 0 else { throw ConvError("Invalid size") }
+        guard w > 0, h > 0, value > 0 else { throw ConvError(tr("Invalid size")) }
         let scale: Double = switch mode {
         case .longest: Double(value) / Double(max(w, h))
         case .width: Double(value) / Double(w)
         case .height: Double(value) / Double(h)
         case .percent: Double(value) / 100
         }
-        guard scale < 1 else { throw Skipped("Already \(w)×\(h), left as is") }
+        guard scale < 1 else { throw Skipped(tr("Already %d×%d, left as is", w, h)) }
         let nw = max(1, Int((Double(w) * scale).rounded())), nh = max(1, Int((Double(h) * scale).rounded()))
         let (type, ext) = outputType(s)
         let out = outputURL(for: src, suffix: "\(nw)×\(nh)", ext: ext, folder: folder)
@@ -177,19 +177,19 @@ enum ImageOps {
         let upright = try upright(s)
         let iw = upright.width, ih = upright.height
         let (nw, nh) = degrees == 180 ? (iw, ih) : (ih, iw)
-        guard let c = context(nw, nh, like: upright) else { throw ConvError("Not enough memory") }
+        guard let c = context(nw, nh, like: upright) else { throw ConvError(tr("Not enough memory")) }
         switch degrees {
         case 90: c.translateBy(x: 0, y: CGFloat(nh)); c.rotate(by: -.pi / 2)
         case 180: c.translateBy(x: CGFloat(nw), y: CGFloat(nh)); c.rotate(by: .pi)
         default: c.translateBy(x: CGFloat(nw), y: 0); c.rotate(by: .pi / 2)
         }
         c.draw(upright, in: CGRect(x: 0, y: 0, width: iw, height: ih))
-        guard let rotated = c.makeImage() else { throw ConvError("Rotating failed") }
+        guard let rotated = c.makeImage() else { throw ConvError(tr("Rotating failed")) }
 
         var p = uprightMetadata(s)
         p[kCGImageDestinationLossyCompressionQuality] = 0.92
         let (type, ext) = outputType(s)
-        let out = outputURL(for: src, suffix: "rotated", ext: ext, folder: folder)
+        let out = outputURL(for: src, suffix: tr("rotated"), ext: ext, folder: folder)
         try write(out, type: type) { CGImageDestinationAddImage($0, rotated, p as CFDictionary) }
         return out
     }
@@ -200,7 +200,7 @@ enum ImageOps {
     static func strip(_ src: URL, mode: StripMode, folder: URL?) throws -> URL {
         let s = try source(src)
         guard let type = CGImageSourceGetType(s), writableTypes.contains(type as String) else {
-            throw ConvError("macOS can't save this format, convert it first")
+            throw ConvError(tr("macOS can't save this format, convert it first"))
         }
         let meta: CGMutableImageMetadata
         switch mode {
@@ -212,9 +212,9 @@ enum ImageOps {
                                                              kCGImagePropertyOrientation, o as CFTypeRef)
             }
         case .location:
-            guard properties(s)[kCGImagePropertyGPSDictionary] != nil else { throw Skipped("No location stored") }
+            guard properties(s)[kCGImagePropertyGPSDictionary] != nil else { throw Skipped(tr("No location stored")) }
             guard let existing = CGImageSourceCopyMetadataAtIndex(s, 0, nil),
-                  let copy = CGImageMetadataCreateMutableCopy(existing) else { throw Skipped("No location stored") }
+                  let copy = CGImageMetadataCreateMutableCopy(existing) else { throw Skipped(tr("No location stored")) }
             var paths: [String] = []
             CGImageMetadataEnumerateTagsUsingBlock(copy, nil, nil) { path, tag in
                 if let name = CGImageMetadataTagCopyName(tag) as String?, name.hasPrefix("GPS") { paths.append(path as String) }
@@ -223,9 +223,9 @@ enum ImageOps {
             for p in paths { CGImageMetadataRemoveTagWithPath(copy, nil, p as CFString) }
             meta = copy
         }
-        let out = outputURL(for: src, suffix: mode == .all ? "no info" : "no location", folder: folder)
+        let out = outputURL(for: src, suffix: tr(mode == .all ? "no info" : "no location"), folder: folder)
         guard let d = CGImageDestinationCreateWithURL(out as CFURL, type, 1, nil) else {
-            throw ConvError("Can't write to destination")
+            throw ConvError(tr("Can't write to destination"))
         }
         let opts: [CFString: Any] = [
             kCGImageDestinationMetadata: meta,
@@ -236,7 +236,7 @@ enum ImageOps {
         var err: Unmanaged<CFError>?
         guard CGImageDestinationCopyImageSource(d, s, opts as CFDictionary, &err) else {
             try? FileManager.default.removeItem(at: out)
-            throw ConvError(err?.takeRetainedValue().localizedDescription ?? "Writing failed")
+            throw ConvError(err?.takeRetainedValue().localizedDescription ?? tr("Writing failed"))
         }
         return out
     }
@@ -256,7 +256,7 @@ enum ImageOps {
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceThumbnailMaxPixelSize: min(maxEdge, max(w, h)),
             kCGImageSourceCreateThumbnailWithTransform: true,
-        ] as CFDictionary) else { throw ConvError("Image can't be read") }
+        ] as CFDictionary) else { throw ConvError(tr("Image can't be read")) }
         // Graphics and screenshots stay lossless
         if hasAlpha(s) || type == UTType.png.identifier || type == UTType.tiff.identifier { return img }
         let data = NSMutableData()

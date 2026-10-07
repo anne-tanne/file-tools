@@ -11,7 +11,7 @@ enum Compressor {
         let steps: Int
         let attempt: (Int, URL) throws -> Void
         if let target {
-            guard before > target else { throw Skipped("Already under \(fmtSize(target))") }
+            guard before > target else { throw Skipped(tr("Already under %@", fmtSize(target))) }
             if kind == .pdf {
                 steps = Level.pdfLadder.count
                 attempt = { i, u in try PDFOps.compress(src, dpi: Level.pdfLadder[i].dpi, quality: Level.pdfLadder[i].quality, to: u) }
@@ -32,7 +32,7 @@ enum Compressor {
         var best: (url: URL, size: Int64)? = nil
         do {
             for i in 0..<steps {
-                if steps > 1 { progress("Trying step \(i + 1) of \(steps)…") }
+                if steps > 1 { progress(tr("Trying step %d of %d…", i + 1, steps)) }
                 let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
                 try attempt(i, tmp)
                 let size = fileSize(tmp)
@@ -50,9 +50,9 @@ enum Compressor {
         }
         guard let b = best, Double(b.size) <= Double(before) * 0.95 else {
             if let b = best { try? fm.removeItem(at: b.url) }
-            throw Skipped("Already small, original kept")
+            throw Skipped(tr("Already small, original kept"))
         }
-        let out = outputURL(for: src, suffix: "compressed", ext: ext, folder: folder)
+        let out = outputURL(for: src, suffix: tr("compressed"), ext: ext, folder: folder)
         try fm.moveItem(at: b.url, to: out)
         return out
     }

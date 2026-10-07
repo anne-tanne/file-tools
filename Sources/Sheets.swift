@@ -3,12 +3,12 @@ import SwiftUI
 
 // MARK: - Page picker
 
+/// Page overview shown below the file list; every change is passed on right away.
 struct PagePicker: View {
     let url: URL
     let pageCount: Int
     @State var selected: Set<Int>
-    let onDone: (Set<Int>) -> Void
-    @Environment(\.dismiss) var dismiss
+    let onChange: (Set<Int>) -> Void
     @State private var thumbs: [Int: NSImage] = [:]
     @State private var rangeText = ""
     @State private var rangeError = false
@@ -41,7 +41,7 @@ struct PagePicker: View {
                                     else { Rectangle().fill(.quaternary) }
                                 }
                                 .frame(height: 150)
-                                .overlay(RoundedRectangle(cornerRadius: 4).stroke(on ? Color.accentColor : .secondary.opacity(0.3), lineWidth: on ? 3 : 1))
+                                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(on ? Color.accentColor : .secondary.opacity(0.3), lineWidth: on ? 3 : 1))
                                 Image(systemName: on ? "checkmark.circle.fill" : "circle")
                                     .font(.title2).foregroundStyle(on ? Color.accentColor : .secondary)
                                     .background(Circle().fill(.background))
@@ -51,24 +51,20 @@ struct PagePicker: View {
                         }
                         .contentShape(Rectangle())
                         .onTapGesture { if on { selected.remove(i) } else { selected.insert(i) }; rangeText = rangeString(selected) }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Page \(i + 1)")
+                        .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+                        .accessibilityAction { if on { selected.remove(i) } else { selected.insert(i) }; rangeText = rangeString(selected) }
                         .task { await loadThumb(i) }
                     }
                 }
                 .padding(4)
             }
-            HStack {
-                Text("No pages selected = all pages are converted").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Done") {
-                    onDone(selected.count == pageCount ? [] : selected)
-                    dismiss()
-                }.keyboardShortcut(.defaultAction)
-            }
+            Text("No pages selected = all pages are used").font(.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(20)
-        .frame(width: 640, height: 560)
         .onAppear { rangeText = rangeString(selected) }
+        .onChange(of: selected) { _, s in onChange(s.count == pageCount ? [] : s) }
     }
 
     func applyRange() {
@@ -79,12 +75,180 @@ struct PagePicker: View {
 
     func loadThumb(_ i: Int) async {
         guard thumbs[i] == nil else { return }
-        let url = url
-        let img = await Task.detached { () -> NSImage? in
-            guard let page = PDFDocument(url: url)?.page(at: i) else { return nil }
-            return page.thumbnail(of: NSSize(width: 240, height: 300), for: .mediaBox)
-        }.value
-        thumbs[i] = img
+        thumbs[i] = await pageThumbnail(url, i)
+    }
+}
+
+func pageThumbnail(_ url: URL, _ i: Int) async -> NSImage? {
+    await Task.detached { () -> NSImage? in
+        guard let doc = PDFDocument(url: url), let page = doc.page(at: i) else { return nil }
+        return withExtendedLifetime(doc) { page.thumbnail(of: NSSize(width: 240, height: 300), for: .mediaBox) }
+    }.value
+}
+
+// MARK: - Assign pages to several PDFs (Split)
+
+let partColors: [Color] = [.blue, .orange, .green, .pink, .purple, .teal, .red, .indigo, .brown, .mint, .yellow, .cyan]
+func partColor(_ n: Int) -> Color { partColors[n % partColors.count] }
+
+/// Click pages to put them into the new PDF; "New PDF" adds more, each shown in its own colour.
+struct PartsPicker: View {
+    let url: URL
+    let pageCount: Int
+    let onChange: ([[Int]], [String]) -> Void
+    @State private var parts: [Set<Int>]
+    @State private var names: [String]   // same length as parts; "" = default name
+    @State private var active = 0
+    @State private var lastClicked: Int? = nil
+    @State private var thumbs: [Int: NSImage] = [:]
+    @State private var rangeText = ""
+    @State private var rangeError = false
+
+    init(url: URL, pageCount: Int, parts: [[Int]], names: [String], onChange: @escaping ([[Int]], [String]) -> Void) {
+        self.url = url
+        self.pageCount = pageCount
+        self.onChange = onChange
+        _parts = State(initialValue: parts.isEmpty ? [[]] : parts.map(Set.init))
+        _names = State(initialValue: parts.isEmpty ? [""] : parts.indices.map { $0 < names.count ? names[$0] : "" })
+    }
+
+    /// File name used when the name field is left empty
+    func defaultName(_ n: Int) -> String {
+        let used = parts.filter { !$0.isEmpty }
+        let k = parts[..<n].filter { !$0.isEmpty }.count
+        return PDFOps.partName(url.deletingPathExtension().lastPathComponent, parts[n].sorted(), n: k, count: max(1, used.count))
+    }
+
+    /// Passes on the non-empty parts with their names
+    func report() {
+        let keep = parts.indices.filter { !parts[$0].isEmpty }
+        onChange(keep.map { parts[$0].sorted() }, keep.map { names[$0] })
+    }
+
+    func part(of page: Int) -> Int? { parts.firstIndex { $0.contains(page) } }
+    var assignedCount: Int { parts.reduce(0) { $0 + $1.count } }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text(url.lastPathComponent).font(.headline).lineLimit(1)
+                Spacer()
+                Text("\(assignedCount) of \(pageCount) pages selected").foregroundStyle(.secondary)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(parts.indices, id: \.self) { n in chip(n) }
+                    Button { parts.append([]); names.append(""); active = parts.count - 1; lastClicked = nil } label: {
+                        Label("New PDF", systemImage: "plus")
+                    }
+                    .controlSize(.small)
+                }
+                .padding(2)
+            }
+            HStack {
+                TextField("Pages for PDF \(active + 1), e.g. 1-3, 5", text: $rangeText)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(applyRange)
+                    .foregroundStyle(rangeError ? .red : .primary)
+                Button("Add", action: applyRange)
+                Divider().frame(height: 18)
+                Button("All Remaining") { assign(Set(0..<pageCount).filter { part(of: $0) == nil }) }
+                    .disabled(assignedCount == pageCount)
+                Button("Clear All") { parts = [[]]; names = [""]; active = 0; lastClicked = nil }
+            }
+            HStack {
+                Text("Name")
+                TextField("File name for PDF \(active + 1)", text: $names[active],
+                          prompt: Text(parts[active].isEmpty ? "Optional" : defaultName(active)))
+                    .textFieldStyle(.roundedBorder).labelsHidden()
+                Text(".pdf").foregroundStyle(.secondary)
+            }
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 14)], spacing: 14) {
+                    ForEach(0..<pageCount, id: \.self) { i in tile(i) }
+                }
+                .padding(4)
+            }
+            Text("Click pages to add them to the new PDF, shift-click for a range. Use New PDF to make several PDFs at once, each in its own colour.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onChange(of: parts) { report() }
+        .onChange(of: names) { report() }
+    }
+
+    func chip(_ n: Int) -> some View {
+        let on = n == active
+        return HStack(spacing: 6) {
+            Circle().fill(partColor(n)).frame(width: 12, height: 12)
+            Text(names[n].trimmingCharacters(in: .whitespaces).isEmpty ? "PDF \(n + 1)" : names[n])
+                .fontWeight(on ? .semibold : .regular).lineLimit(1).truncationMode(.middle).frame(maxWidth: 180)
+            Text("\(parts[n].count)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            if on && parts.count > 1 {
+                Button { removePart(n) } label: { Label("Remove PDF \(n + 1)", systemImage: "xmark.circle.fill") }
+                    .labelStyle(.iconOnly).buttonStyle(.borderless).foregroundStyle(.secondary).help("Remove this PDF")
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 5)
+        .background(Capsule().fill(partColor(n).opacity(on ? 0.22 : 0.08)))
+        .overlay(Capsule().stroke(on ? partColor(n) : .clear, lineWidth: 2))
+        .contentShape(Capsule())
+        .onTapGesture { active = n; lastClicked = nil; rangeText = "" }
+    }
+
+    func tile(_ i: Int) -> some View {
+        let p = part(of: i)
+        let color = p.map(partColor) ?? .secondary.opacity(0.3)
+        return VStack(spacing: 4) {
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let t = thumbs[i] { Image(nsImage: t).resizable().scaledToFit() }
+                    else { Rectangle().fill(.quaternary) }
+                }
+                .frame(height: 150)
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(p.map { partColor($0).opacity(0.12) } ?? .clear))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(color, lineWidth: p == nil ? 1 : 3))
+                if let p {
+                    Text("\(p + 1)").font(.caption.bold()).foregroundStyle(.white)
+                        .frame(width: 22, height: 22).background(Circle().fill(partColor(p)))
+                        .padding(6)
+                }
+            }
+            Text("\(i + 1)").font(.caption).foregroundStyle(.secondary)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { click(i) }
+        .task { if thumbs[i] == nil { thumbs[i] = await pageThumbnail(url, i) } }
+    }
+
+    func click(_ i: Int) {
+        if NSEvent.modifierFlags.contains(.shift), let last = lastClicked {
+            assign(Set(min(last, i)...max(last, i)))
+        } else if parts[active].contains(i) {
+            parts[active].remove(i)
+        } else {
+            assign([i])
+        }
+        lastClicked = i
+    }
+
+    /// Gives pages the active colour, taking them away from any other
+    func assign(_ pages: Set<Int>) {
+        for n in parts.indices where n != active { parts[n].subtract(pages) }
+        parts[active].formUnion(pages)
+    }
+
+    func removePart(_ n: Int) {
+        parts.remove(at: n)
+        names.remove(at: n)
+        active = min(n, parts.count - 1)
+        lastClicked = nil
+    }
+
+    func applyRange() {
+        guard !rangeText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        if let r = parseRanges(rangeText, pageCount: pageCount) { assign(r); rangeText = ""; rangeError = false }
+        else { rangeError = true; NSSound.beep() }
     }
 }
 
@@ -140,7 +304,8 @@ struct CompareView: View {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .background(Color.black.opacity(0.05))
+            .background(.fill.quinary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             HStack {
                 if isPDF && pageCount > 1 {

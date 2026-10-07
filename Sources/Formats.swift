@@ -13,6 +13,10 @@ struct Skipped: LocalizedError {
     init(_ message: String) { errorDescription = message }
 }
 
+/// Enums whose raw value is English UI text
+protocol Titled: RawRepresentable<String> {}
+extension Titled { var title: String { tr(rawValue) } }
+
 enum Kind: Sendable { case image, pdf }
 
 enum OutFormat: String, CaseIterable, Identifiable, Sendable {
@@ -31,16 +35,16 @@ enum OutFormat: String, CaseIterable, Identifiable, Sendable {
     var isLossy: Bool { self == .jpg || self == .heic || self == .avif }
     var hint: String {
         switch self {
-        case .jpg: "Works everywhere"
-        case .png: "Lossless, keeps transparency"
-        case .heic: "Small files, best on Apple devices"
-        case .avif: "Smallest files, for the web"
-        case .tiff: "Lossless, for print and archiving"
+        case .jpg: tr("Works everywhere")
+        case .png: tr("Lossless, keeps transparency")
+        case .heic: tr("Small files, best on Apple devices")
+        case .avif: tr("Smallest files, for the web")
+        case .tiff: tr("Lossless, for print and archiving")
         }
     }
 }
 
-enum Level: String, CaseIterable, Identifiable, Sendable {
+enum Level: String, CaseIterable, Identifiable, Sendable, Titled {
     case high = "High quality", balanced = "Balanced", small = "Smallest"
     var id: String { rawValue }
     /// JPEG quality used for photos and for images inside PDFs
@@ -51,9 +55,9 @@ enum Level: String, CaseIterable, Identifiable, Sendable {
     var maxEdge: Int? { switch self { case .high: nil; case .balanced: 4000; case .small: 2500 } }
     var hint: String {
         switch self {
-        case .high: "Barely visible difference, good for printing"
-        case .balanced: "Looks the same on screen, much smaller"
-        case .small: "For email and web, still sharp on screen"
+        case .high: tr("Barely visible difference, good for printing")
+        case .balanced: tr("Looks the same on screen, much smaller")
+        case .small: tr("For email and web, still sharp on screen")
         }
     }
 
@@ -67,25 +71,25 @@ enum Level: String, CaseIterable, Identifiable, Sendable {
     ]
 }
 
-enum CompressBy: String, CaseIterable, Identifiable { case level = "Quality level", target = "Target size"; var id: String { rawValue } }
+enum CompressBy: String, CaseIterable, Identifiable, Titled { case level = "Quality level", target = "Target size"; var id: String { rawValue } }
 
-enum ResizeMode: String, CaseIterable, Identifiable, Sendable {
+enum ResizeMode: String, CaseIterable, Identifiable, Sendable, Titled {
     case longest = "Longest side", width = "Width", height = "Height", percent = "Percentage"
     var id: String { rawValue }
 }
 
-enum StripMode: String, CaseIterable, Identifiable, Sendable {
+enum StripMode: String, CaseIterable, Identifiable, Sendable, Titled {
     case all = "Everything", location = "Location only"
     var id: String { rawValue }
 }
 
-enum PageSize: String, CaseIterable, Identifiable, Sendable {
+enum PageSize: String, CaseIterable, Identifiable, Sendable, Titled {
     case a4 = "A4", letter = "US Letter", fit = "Same as image"
     var id: String { rawValue }
 }
 
-enum SplitMode: String, CaseIterable, Identifiable, Sendable {
-    case extract = "Selected pages as one PDF", each = "Each page separately", chunks = "Every few pages"
+enum SplitMode: String, CaseIterable, Identifiable, Sendable, Titled {
+    case extract = "Selected pages", each = "Each page separately", chunks = "Every few pages"
     var id: String { rawValue }
 }
 
