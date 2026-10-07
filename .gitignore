@@ -1,2 +1,4 @@
 *.app/
 .DS_Store
+# Intermediate render from icon.swift, only needed to make AppIcon.icns
+icon_1024.png
