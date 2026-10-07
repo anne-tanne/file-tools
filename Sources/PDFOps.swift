@@ -5,15 +5,15 @@ import Quartz
 
 enum PDFOps {
     static func open(_ url: URL) throws -> PDFDocument {
-        guard let d = PDFDocument(url: url) else { throw ConvError("PDF can't be read") }
-        if d.isLocked { throw ConvError("PDF is password protected") }
+        guard let d = PDFDocument(url: url) else { throw ConvError(tr("PDF can't be read")) }
+        if d.isLocked { throw ConvError(tr("PDF is password protected")) }
         return d
     }
 
     static func save(_ doc: PDFDocument, to out: URL, options: [PDFDocumentWriteOption: Any] = [:]) throws {
         guard doc.write(to: out, withOptions: options) else {
             try? FileManager.default.removeItem(at: out)
-            throw ConvError("Writing failed")
+            throw ConvError(tr("Writing failed"))
         }
     }
 
@@ -53,9 +53,9 @@ enum PDFOps {
         for (n, i) in pages.enumerated() {
             progress(n + 1)
             guard let page = doc.page(at: i), let img = render(page, dpi: dpi) else {
-                throw ConvError("Page \(i + 1) can't be rendered")
+                throw ConvError(tr("Page %d can't be rendered", i + 1))
             }
-            let name = doc.pageCount == 1 ? base : "\(base) - page \(String(format: "%0\(digits)d", i + 1))"
+            let name = doc.pageCount == 1 ? base : "\(base) - \(tr("page")) \(String(format: "%0\(digits)d", i + 1))"
             let out = uniqueURL(dir, name, fmt.ext)
             var p: [CFString: Any] = [kCGImagePropertyDPIWidth: dpi, kCGImagePropertyDPIHeight: dpi]
             if fmt.isLossy { p[kCGImageDestinationLossyCompressionQuality] = quality }
@@ -73,7 +73,7 @@ enum PDFOps {
         let filterData: [String: Any] = [
             "Domains": ["Applications": true, "Printing": true],
             "FilterType": 1,
-            "Name": "Image Converter",
+            "Name": "File Tools",
             "FilterData": ["ColorSettings": ["ImageSettings": [
                 "Compression Quality": quality,
                 "ImageCompression": "ImageJPEGCompress",
@@ -82,16 +82,25 @@ enum PDFOps {
             ]]],
         ]
         let qf = FileManager.default.temporaryDirectory
-            .appendingPathComponent("imageconverter-\(dpi)-\(Int(quality * 100)).qfilter")
+            .appendingPathComponent("filetools-\(dpi)-\(Int(quality * 100)).qfilter")
         guard (filterData as NSDictionary).write(to: qf, atomically: true), let filter = QuartzFilter(url: qf) else {
-            throw ConvError("Compression filter unavailable")
+            throw ConvError(tr("Compression filter unavailable"))
         }
         try save(doc, to: out, options: [PDFDocumentWriteOption(rawValue: "QuartzFilter"): filter])
     }
 
     // MARK: Split
 
-    static func split(_ src: URL, pages: [Int], mode: SplitMode, chunk: Int, folder: URL?) throws -> [URL] {
+    /// Default file name (without extension) of part n of `count` in `.extract` mode
+    static func partName(_ base: String, _ part: [Int], n: Int, count: Int) -> String {
+        let pages = "(\(tr("pages")) \(rangeString(Set(part))))"
+        return count == 1 ? "\(base) \(pages)" : "\(base) - \(tr("part")) \(n + 1) \(pages)"
+    }
+
+    /// parts: page groups for `.extract` mode, one PDF each (chosen in the parts picker);
+    /// names: optional file names for those PDFs, empty = default name
+    static func split(_ src: URL, pages: [Int], mode: SplitMode, chunk: Int, parts: [[Int]] = [], names: [String] = [],
+                      folder: URL?) throws -> [URL] {
         let doc = try open(src)
         let base = src.deletingPathExtension().lastPathComponent
         let dir = folder ?? src.deletingLastPathComponent()
@@ -100,14 +109,19 @@ enum PDFOps {
         let groups: [(name: String, pages: [Int])]
         switch mode {
         case .extract:
-            groups = [("\(base) (pages \(rangeString(Set(pages))))", pages)]
+            guard !parts.isEmpty else { throw ConvError(tr("No pages selected yet: click pages in the overview first")) }
+            groups = parts.enumerated().map { n, part in
+                var name = n < names.count ? names[n].trimmingCharacters(in: .whitespaces) : ""
+                if name.lowercased().hasSuffix(".pdf") { name = String(name.dropLast(4)).trimmingCharacters(in: .whitespaces) }
+                return (name.isEmpty ? partName(base, part, n: n, count: parts.count) : name, part)
+            }
         case .each:
-            groups = pages.map { ("\(base) - page \(pad($0))", [$0]) }
+            groups = pages.map { ("\(base) - \(tr("page")) \(pad($0))", [$0]) }
         case .chunks:
             let size = max(1, chunk)
             groups = stride(from: 0, to: pages.count, by: size).enumerated().map { n, start in
                 let part = Array(pages[start..<min(start + size, pages.count)])
-                return ("\(base) - part \(n + 1) (pages \(rangeString(Set(part))))", part)
+                return ("\(base) - \(tr("part")) \(n + 1) (\(tr("pages")) \(rangeString(Set(part))))", part)
             }
         }
         return try groups.map { g in
@@ -125,7 +139,24 @@ enum PDFOps {
         for i in pages {
             if let p = doc.page(at: i) { p.rotation = (p.rotation + degrees) % 360 }
         }
-        let out = outputURL(for: src, suffix: "rotated", ext: "pdf", folder: folder)
+        let out = outputURL(for: src, suffix: tr("rotated"), ext: "pdf", folder: folder)
+        try save(doc, to: out)
+        return out
+    }
+
+    // MARK: Reorder
+
+    /// order: original 0-based page indices in their new order. Pages are moved within the document,
+    /// so bookmarks, links and document info stay intact.
+    static func reorder(_ src: URL, order: [Int], folder: URL?) throws -> URL {
+        let doc = try open(src)
+        guard order.sorted() == Array(0..<doc.pageCount) else { throw ConvError(tr("Page order doesn't match the PDF")) }
+        let pages = order.compactMap { doc.page(at: $0) }
+        for (pos, page) in pages.enumerated() {
+            let cur = doc.index(for: page)
+            if cur != pos { doc.exchangePage(at: cur, withPageAt: pos) }
+        }
+        let out = outputURL(for: src, suffix: tr("reordered"), ext: "pdf", folder: folder)
         try save(doc, to: out)
         return out
     }
@@ -135,7 +166,7 @@ enum PDFOps {
     static func stripInfo(_ src: URL, folder: URL?) throws -> URL {
         let doc = try open(src)
         doc.documentAttributes = [:]
-        let out = outputURL(for: src, suffix: "no info", ext: "pdf", folder: folder)
+        let out = outputURL(for: src, suffix: tr("no info"), ext: "pdf", folder: folder)
         try save(doc, to: out)
         return out
     }
@@ -157,7 +188,7 @@ enum PDFOps {
                 result.insert(try imagePage(e.url, pageSize: pageSize, margin: margin), at: result.pageCount)
             }
         }
-        guard result.pageCount > 0 else { throw ConvError("Nothing to combine") }
+        guard result.pageCount > 0 else { throw ConvError(tr("Nothing to combine")) }
         try save(result, to: out)
         return result.pageCount
     }
@@ -166,7 +197,7 @@ enum PDFOps {
     static func imagePage(_ url: URL, pageSize: PageSize, margin: Bool) throws -> PDFPage {
         let s = try ImageOps.source(url)
         let (w, h) = ImageOps.displaySize(s)
-        guard w > 0, h > 0 else { throw ConvError("\(url.lastPathComponent) can't be read") }
+        guard w > 0, h > 0 else { throw ConvError(tr("%@ can't be read", url.lastPathComponent)) }
         let landscape = w > h
         let inset: CGFloat = margin ? 28 : 0   // about 1 cm
         var page: CGSize
@@ -190,14 +221,14 @@ enum PDFOps {
         let data = NSMutableData()
         var box = CGRect(origin: .zero, size: page)
         guard let consumer = CGDataConsumer(data: data as CFMutableData),
-              let ctx = CGContext(consumer: consumer, mediaBox: &box, nil) else { throw ConvError("PDF can't be created") }
+              let ctx = CGContext(consumer: consumer, mediaBox: &box, nil) else { throw ConvError(tr("PDF can't be created")) }
         ctx.beginPDFPage(nil)
         ctx.interpolationQuality = .high
         ctx.draw(img, in: rect)
         ctx.endPDFPage()
         ctx.closePDF()
         guard let tmp = PDFDocument(data: data as Data), let p = tmp.page(at: 0)?.copy() as? PDFPage else {
-            throw ConvError("PDF can't be created")
+            throw ConvError(tr("PDF can't be created"))
         }
         return p
     }

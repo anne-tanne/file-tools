@@ -10,7 +10,7 @@ struct ContentView: View {
             List(selection: Binding(get: { Optional(m.tool) }, set: { if let t = $0 { m.tool = t } })) {
                 Section("Convert & Compress") { toolRows([.convert, .compress, .resize]) }
                 Section("Edit") { toolRows([.rotate, .strip, .rename]) }
-                Section("PDF") { toolRows([.combine, .split]) }
+                Section("PDF") { toolRows([.combine, .split, .reorder, .extractImages]) }
             }
             .disabled(m.busy)
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
@@ -18,12 +18,8 @@ struct ContentView: View {
             ToolView()
         }
         .environmentObject(m)
+        .focusedSceneObject(m)
         .frame(minWidth: 880, minHeight: 580)
-        .sheet(item: Binding(get: { m.items.first { $0.id == m.editing } }, set: { m.editing = $0?.id })) { it in
-            PagePicker(url: it.url, pageCount: it.pageCount, selected: it.selected) { sel in
-                m.update(it.id) { $0.selected = sel; $0.done = false; $0.failed = false; $0.status = "Ready" }
-            }
-        }
         .sheet(item: Binding(get: { m.items.first { $0.id == m.comparing && $0.output != nil } }, set: { m.comparing = $0?.id })) { it in
             CompareView(original: it.url, compressed: it.output!, isPDF: it.kind == .pdf) {
                 try? FileManager.default.removeItem(at: it.output!)
@@ -45,62 +41,94 @@ struct ToolView: View {
     var body: some View {
         let preview = m.tool == .rename ? m.renamePreview() : [:]
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(m.tool.rawValue).font(.title2.bold())
-                Text(m.tool.subtitle).foregroundStyle(.secondary)
+            if let it = m.pageItem {
+                // List shrinks to what it needs, the page overview gets the free space
+                dropZone(preview)
+                    .frame(height: min(CGFloat(m.items.count) * 30 + 16, 150))
+                pagePanel(it)
+                    .layoutPriority(1)
+            } else {
+                dropZone(preview)
+                    .frame(minHeight: 220)
+                    .layoutPriority(1)   // the list gets the free space, settings only what they need
             }
-
-            dropZone(preview)
-                .layoutPriority(1)   // the list gets the free space, settings only what they need
 
             VStack(alignment: .leading, spacing: 6) { settings }
 
             if m.tool.writesFiles {
                 HStack {
-                    Text("Save to:")
-                    Text(m.outputFolder?.path ?? "same folder as original")
+                    Label("Save to", systemImage: "folder").labelStyle(.titleAndIcon)
+                    Text(m.outputFolder?.path ?? "Same folder as original")
                         .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     Spacer()
-                    if m.outputFolder != nil { Button("Reset") { m.outputFolder = nil } }
+                    if m.outputFolder != nil { Button("Use Original Folder") { m.outputFolder = nil } }
                     Button("Choose Folder…") { m.pickFolder() }
                 }
             }
 
-            if let s = m.summary {
-                Label(s, systemImage: s.hasPrefix("Error") || s.hasPrefix("Nothing") ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(s.hasPrefix("Error") || s.hasPrefix("Nothing") ? Color.red : Color.green)
-            }
+            Divider()
 
             bottomBar
         }
         .padding(20)
-        .navigationTitle("Image Converter")
+        .navigationTitle(m.tool.rawValue)
+        .navigationSubtitle(m.tool.subtitle)
+        .toolbar { toolbar }
+    }
+
+    // MARK: Toolbar
+
+    @ToolbarContentBuilder var toolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button { m.pickFiles() } label: { Label("Add Files", systemImage: "plus") }
+                .help("Add photos, PDFs or folders (⌘O)")
+                .disabled(m.busy)
+            Menu {
+                Button("By Name") { m.sort(.name) }
+                Button("By Date Taken") { m.sort(.date) }
+                Divider()
+                Button("Reverse Order") { m.items.reverse() }
+            } label: {
+                Label("Sort", systemImage: "arrow.up.arrow.down")
+            }
+            .help("Sort the list")
+            .disabled(m.busy || m.items.count < 2)
+            Button { m.clearList() } label: { Label("Clear List", systemImage: "trash") }
+                .help("Remove all files from the list. The files themselves are not touched.")
+                .disabled(m.busy || m.items.isEmpty)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button { m.showInFinder() } label: { Label("Show in Finder", systemImage: "finder") }
+                .help("Show the new files in Finder (⇧⌘R)")
+                .disabled(m.busy || m.lastOutputs.isEmpty)
+        }
     }
 
     // MARK: File list
 
     func dropZone(_ preview: [Item.ID: String]) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [7]))
-                .foregroundStyle(targeted ? Color.accentColor : .secondary.opacity(0.5))
-                .background(RoundedRectangle(cornerRadius: 14).fill(targeted ? Color.accentColor.opacity(0.08) : .clear))
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        return ZStack {
             if m.items.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: m.tool.icon).font(.system(size: 36)).foregroundStyle(.secondary)
-                    Text(dropHint).font(.headline)
+                shape.strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                    .foregroundStyle(targeted ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator))
+                ContentUnavailableView {
+                    Label(dropHint, systemImage: m.tool.icon)
+                } actions: {
                     Button("Choose Files…") { m.pickFiles() }
                 }
             } else {
-                List {
-                    ForEach(m.items) { it in row(it, preview: preview) }
+                shape.fill(.fill.quinary)
+                shape.strokeBorder(targeted ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator), lineWidth: targeted ? 2 : 1)
+                List(selection: Binding(get: { m.pageItem?.id ?? m.focused }, set: { m.focused = $0 })) {
+                    ForEach(m.items) { it in row(it, preview: preview).tag(it.id) }
                         .onMove { m.items.move(fromOffsets: $0, toOffset: $1) }
                 }
                 .scrollContentBackground(.hidden)
                 .padding(6)
             }
         }
-        .frame(minHeight: 220)
+        .background(targeted ? AnyShapeStyle(Color.accentColor.opacity(0.08)) : AnyShapeStyle(.clear), in: shape)
         .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
             for p in providers {
                 _ = p.loadObject(ofClass: URL.self) { url, _ in
@@ -114,7 +142,7 @@ struct ToolView: View {
     var dropHint: String {
         switch m.tool {
         case .resize: "Drop photos or folders here"
-        case .split: "Drop PDFs here"
+        case .split, .reorder, .extractImages: "Drop PDFs here"
         default: "Drop photos, PDFs or folders here"
         }
     }
@@ -125,13 +153,17 @@ struct ToolView: View {
             Image(systemName: it.done && usable ? "checkmark.circle.fill" : it.failed ? "xmark.octagon.fill" : it.kind == .pdf ? "doc.richtext" : "photo")
                 .foregroundStyle(it.done && usable ? .green : it.failed ? .red : .secondary)
                 .frame(width: 18)
+                .accessibilityHidden(true)
             Text(it.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
-            if usable && it.kind == .pdf && m.tool.usesPages {
-                Button { m.editing = it.id } label: {
-                    Label("Select Pages…", systemImage: "square.grid.2x2").font(.caption)
+            if usable && it.kind == .pdf && m.assignsParts {
+                HStack(spacing: 3) {
+                    ForEach(it.parts.indices, id: \.self) { Circle().fill(partColor($0)).frame(width: 8, height: 8) }
                 }
-                .buttonStyle(.bordered).controlSize(.small).disabled(m.busy)
+                Text(it.partsSummary).font(.caption).foregroundStyle(.secondary)
+            } else if usable && it.kind == .pdf && m.tool.usesPages {
                 Text(it.pageSummary).font(.caption).foregroundStyle(.secondary)
+            } else if usable && m.tool == .reorder {
+                Text(it.orderSummary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             if m.tool == .rename, !it.done, let new = preview[it.id], new != it.url.lastPathComponent {
                 Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
@@ -143,10 +175,48 @@ struct ToolView: View {
             if m.tool == .compress, it.output != nil {
                 Button("Compare") { m.comparing = it.id }.controlSize(.small)
             }
-            Button { m.remove(it.id) } label: { Image(systemName: "xmark") }
-                .buttonStyle(.borderless).foregroundStyle(.secondary).disabled(m.busy)
+            Button { m.remove(it.id) } label: { Label("Remove from List", systemImage: "xmark.circle.fill") }
+                .labelStyle(.iconOnly).buttonStyle(.borderless).foregroundStyle(.secondary)
+                .help("Remove from list").disabled(m.busy)
         }
         .opacity(usable ? 1 : 0.45)
+        .accessibilityElement(children: .contain)
+        .contextMenu {
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([it.url]) }
+            Divider()
+            Button("Remove from List") { m.remove(it.id) }.disabled(m.busy)
+        }
+    }
+
+    // MARK: Page overview
+
+    /// Pages of the selected PDF, right in the window; changes apply immediately
+    @ViewBuilder func pagePanel(_ it: Item) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        Group {
+            if m.tool == .reorder {
+                PageArranger(url: it.url, pageCount: it.pageCount, order: it.order ?? Array(0..<it.pageCount)) { order in
+                    m.update(it.id) {
+                        $0.order = order == Array(0..<it.pageCount) ? nil : order
+                        $0.done = false; $0.failed = false; $0.status = "Ready"
+                    }
+                }
+            } else if m.assignsParts {
+                PartsPicker(url: it.url, pageCount: it.pageCount, parts: it.parts, names: it.partNames) { parts, names in
+                    m.update(it.id) { $0.parts = parts; $0.partNames = names; $0.done = false; $0.failed = false; $0.status = "Ready" }
+                }
+            } else {
+                PagePicker(url: it.url, pageCount: it.pageCount, selected: it.selected) { sel in
+                    m.update(it.id) { $0.selected = sel; $0.done = false; $0.failed = false; $0.status = "Ready" }
+                }
+            }
+        }
+        .id("\(it.id)-\(m.tool.rawValue)-\(m.assignsParts)")   // fresh state per PDF and tool
+        .disabled(m.busy)
+        .padding(14)
+        .frame(minHeight: 260)
+        .background(.fill.quinary, in: shape)
+        .overlay(shape.strokeBorder(.separator))
     }
 
     // MARK: Settings per tool
@@ -161,36 +231,36 @@ struct ToolView: View {
                 .pickerStyle(.segmented).fixedSize()
                 if m.format.isLossy {
                     Text("Quality")
-                    Slider(value: $m.quality, in: 0.3...1.0).frame(width: 100)
+                    Slider(value: $m.quality, in: 0.3...1.0) { Text("Quality") }.labelsHidden().frame(width: 100)
                     Text("\(Int(m.quality * 100)) %").monospacedDigit().frame(width: 40, alignment: .trailing)
                 } else {
                     Text(m.format.hint).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if m.hasPDF {
-                    Picker("PDF pages at", selection: $m.dpi) {
-                        Text("72 dpi (screen)").tag(72)
-                        Text("150 dpi").tag(150)
-                        Text("300 dpi (print)").tag(300)
-                    }
-                    .fixedSize()
+            }
+            if m.hasPDF {   // own line: next to format + quality it overflows the minimum window width
+                Picker("PDF pages at", selection: $m.dpi) {
+                    Text("72 dpi (screen)").tag(72)
+                    Text("150 dpi").tag(150)
+                    Text("300 dpi (print)").tag(300)
                 }
+                .fixedSize()
             }
         case .compress:
             HStack(spacing: 14) {
-                Picker("", selection: $m.compressBy) {
+                Picker("Compress by", selection: $m.compressBy) {
                     ForEach(CompressBy.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
                 Divider().frame(height: 18)
                 if m.compressBy == .level {
-                    Picker("", selection: $m.level) {
+                    Picker("Level", selection: $m.level) {
                         ForEach(Level.allCases) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented).labelsHidden().fixedSize()
                 } else {
                     Text("Smaller than")
-                    TextField("", value: $m.targetMB, format: .number).frame(width: 56).multilineTextAlignment(.trailing)
+                    TextField("Maximum size in MB", value: $m.targetMB, format: .number).labelsHidden().frame(width: 56).multilineTextAlignment(.trailing)
                     Text("MB")
                 }
                 Spacer()
@@ -199,21 +269,21 @@ struct ToolView: View {
                 .font(.caption).foregroundStyle(.secondary)
         case .resize:
             HStack(spacing: 10) {
-                Picker("", selection: $m.resizeMode) {
+                Picker("Resize by", selection: $m.resizeMode) {
                     ForEach(ResizeMode.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .labelsHidden().fixedSize()
                 .onChange(of: m.resizeMode) { _, new in
                     if new == .percent { m.resizeValue = 50 } else if m.resizeValue <= 100 { m.resizeValue = 2000 }
                 }
-                TextField("", value: $m.resizeValue, format: .number).frame(width: 70).multilineTextAlignment(.trailing)
+                TextField("Size", value: $m.resizeValue, format: .number).labelsHidden().frame(width: 70).multilineTextAlignment(.trailing)
                 Text(m.resizeMode == .percent ? "%" : "pixels")
                 Text("Only makes photos smaller. Format and photo info are kept.").font(.caption).foregroundStyle(.secondary)
                 Spacer()
             }
         case .rotate:
             HStack(spacing: 14) {
-                Picker("", selection: $m.rotation) {
+                Picker("Rotation", selection: $m.rotation) {
                     Label("90° right", systemImage: "rotate.right").tag(90)
                     Label("180°", systemImage: "arrow.uturn.down").tag(180)
                     Label("90° left", systemImage: "rotate.left").tag(270)
@@ -225,7 +295,7 @@ struct ToolView: View {
             }
         case .strip:
             HStack(spacing: 14) {
-                Picker("", selection: $m.stripMode) {
+                Picker("Remove", selection: $m.stripMode) {
                     ForEach(StripMode.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
@@ -241,7 +311,7 @@ struct ToolView: View {
         case .rename:
             HStack(spacing: 10) {
                 Text("New name")
-                TextField("Photo ###", text: $m.renamePattern).frame(width: 200)
+                TextField("New name", text: $m.renamePattern, prompt: Text("Photo ###")).labelsHidden().frame(width: 200)
                 Stepper("starting at \(m.renameStart)", value: $m.renameStart, in: 0...99999)
                 Spacer()
                 if !m.lastRename.isEmpty {
@@ -253,7 +323,7 @@ struct ToolView: View {
         case .combine:
             HStack(spacing: 10) {
                 Text("Name")
-                TextField("Combined", text: $m.combinedName).frame(width: 180)
+                TextField("Name", text: $m.combinedName, prompt: Text("Combined")).labelsHidden().frame(width: 180)
                 Text(".pdf").foregroundStyle(.secondary)
                 Divider().frame(height: 18)
                 Picker("Photo pages", selection: $m.pageSize) {
@@ -267,7 +337,7 @@ struct ToolView: View {
                 .font(.caption).foregroundStyle(.secondary)
         case .split:
             HStack(spacing: 14) {
-                Picker("", selection: $m.splitMode) {
+                Picker("Split mode", selection: $m.splitMode) {
                     ForEach(SplitMode.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
@@ -276,36 +346,45 @@ struct ToolView: View {
                 }
                 Spacer()
             }
-            Text("Use Select Pages… to choose which pages are used (all if none selected).")
+            Text(splitHint).font(.caption).foregroundStyle(.secondary)
+        case .reorder:
+            Text("Drag the pages above into the order you want. Click another PDF in the list to arrange its pages. The PDF is saved as a new file.")
                 .font(.caption).foregroundStyle(.secondary)
+        case .extractImages:
+            Toggle("Skip small images (icons, lines, logos under \(PDFImages.minSide) px)", isOn: $m.skipSmallImages)
+            Text("Pictures are saved at their original resolution into a new folder. JPEGs are copied unchanged, others are saved as PNG.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    var splitHint: String {
+        switch m.splitMode {
+        case .extract: "Makes a new PDF from the pages you click above. Add more PDFs to split into several at once."
+        case .each: "Makes one PDF per page. The page selection above limits which pages (all if none selected)."
+        case .chunks: "Cuts the PDF into parts of \(m.chunkSize) pages. The page selection above limits which pages (all if none selected)."
         }
     }
 
     // MARK: Bottom bar
 
     var bottomBar: some View {
-        HStack {
-            if !m.items.isEmpty {
-                Button("Add…") { m.pickFiles() }
-                Button("Clear List") { m.items.removeAll(); m.summary = nil; m.lastRename = [] }.disabled(m.busy)
-                if m.items.count > 1 {
-                    Menu("Sort") {
-                        Button("By Name") { m.sort(.name) }
-                        Button("By Date Taken") { m.sort(.date) }
-                        Divider()
-                        Button("Reverse Order") { m.items.reverse() }
-                    }
-                    .fixedSize().disabled(m.busy)
-                }
+        HStack(spacing: 12) {
+            if let s = m.summary {
+                let bad = s.hasPrefix("Error") || s.hasPrefix("Nothing")
+                Label(s, systemImage: bad ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .symbolRenderingMode(.multicolor)
+                    .foregroundStyle(bad ? .red : .secondary)
+                    .lineLimit(2)
+            } else if !m.items.isEmpty {
+                Text("\(m.items.count) file\(m.items.count == 1 ? "" : "s")").foregroundStyle(.secondary)
             }
             Spacer()
-            if !m.lastOutputs.isEmpty && !m.busy {
-                Button("Show in Finder") { m.showInFinder() }
-            }
             if m.busy { ProgressView().controlSize(.small) }
             Button(actionTitle) { m.run() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
-                .disabled(m.busy || actionDisabled)
+                .disabled(m.busy || !m.canRun)
         }
     }
 
@@ -316,13 +395,6 @@ struct ToolView: View {
         default:
             let n = m.pending.count
             return n == 0 && !m.eligible.isEmpty ? "\(m.tool.action) Again" : "\(m.tool.action) (\(n))"
-        }
-    }
-
-    var actionDisabled: Bool {
-        switch m.tool {
-        case .rename: m.renameCount == 0
-        default: m.eligible.isEmpty
         }
     }
 }
