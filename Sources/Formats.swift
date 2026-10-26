@@ -17,7 +17,7 @@ struct Skipped: LocalizedError {
 protocol Titled: RawRepresentable<String> {}
 extension Titled { var title: String { tr(rawValue) } }
 
-enum Kind: Sendable { case image, pdf }
+enum Kind: Sendable { case image, pdf, word }
 
 enum OutFormat: String, CaseIterable, Identifiable, Sendable {
     case jpg = "JPG", png = "PNG", heic = "HEIC", avif = "AVIF", tiff = "TIFF"
@@ -85,6 +85,11 @@ enum StripMode: String, CaseIterable, Identifiable, Sendable, Titled {
 
 enum PageSize: String, CaseIterable, Identifiable, Sendable, Titled {
     case a4 = "A4", letter = "US Letter", fit = "Same as image"
+    var id: String { rawValue }
+}
+
+enum WordNaming: String, CaseIterable, Identifiable, Sendable, Titled {
+    case keep = "Original name", affix = "Add text", numbered = "Numbered"
     var id: String { rawValue }
 }
 

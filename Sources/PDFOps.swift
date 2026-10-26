@@ -178,6 +178,12 @@ enum PDFOps {
         let result = PDFDocument()
         for (n, e) in entries.enumerated() {
             progress(n + 1)
+            do { try add(e) } catch {
+                // Say which file stopped the whole PDF
+                throw ConvError("\(e.url.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+        func add(_ e: (url: URL, kind: Kind)) throws {
             switch e.kind {
             case .pdf:
                 let doc = try open(e.url)
@@ -186,6 +192,8 @@ enum PDFOps {
                 }
             case .image:
                 result.insert(try imagePage(e.url, pageSize: pageSize, margin: margin), at: result.pageCount)
+            case .word:
+                break   // not accepted by Combine
             }
         }
         guard result.pageCount > 0 else { throw ConvError(tr("Nothing to combine")) }

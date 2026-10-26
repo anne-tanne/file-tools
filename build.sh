@@ -29,6 +29,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>NSHighResolutionCapable</key><true/>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleIconName</key><string>AppIcon</string>
+<key>NSAppleEventsUsageDescription</key><string>File Tools asks Microsoft Word to save your Word documents as PDF.</string>
 </dict></plist>
 PLIST
 codesign --force --sign - "$APP"

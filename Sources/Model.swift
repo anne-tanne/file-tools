@@ -2,12 +2,13 @@ import AppKit
 import ImageIO
 import PDFKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum Tool: String, CaseIterable, Identifiable, Titled {
     case convert = "Convert", compress = "Compress", resize = "Resize"
     case rotate = "Rotate", strip = "Remove Info", rename = "Rename"
     case combine = "Combine to PDF", split = "Split PDF", reorder = "Reorder Pages"
-    case extractImages = "Extract Images"
+    case extractImages = "Extract Images", wordToPDF = "Word to PDF"
     var id: String { rawValue }
 
     var icon: String {
@@ -22,6 +23,7 @@ enum Tool: String, CaseIterable, Identifiable, Titled {
         case .split: "scissors"
         case .reorder: "rectangle.2.swap"
         case .extractImages: "photo.on.rectangle.angled"
+        case .wordToPDF: "doc.text"
         }
     }
     var subtitle: String {
@@ -36,6 +38,7 @@ enum Tool: String, CaseIterable, Identifiable, Titled {
         case .split: tr("Take pages out of a PDF or cut it into parts")
         case .reorder: tr("Drag PDF pages into a new order")
         case .extractImages: tr("Save the pictures inside a PDF as separate image files")
+        case .wordToPDF: tr("Save Word documents as PDFs with the exact Word layout")
         }
     }
     var action: String {
@@ -45,6 +48,7 @@ enum Tool: String, CaseIterable, Identifiable, Titled {
         case .split: "Split"
         case .reorder: "Save"
         case .extractImages: "Extract"
+        case .wordToPDF: "Create PDFs"
         default: rawValue
         }
     }
@@ -52,7 +56,9 @@ enum Tool: String, CaseIterable, Identifiable, Titled {
         switch self {
         case .resize: k == .image
         case .split, .reorder, .extractImages: k == .pdf
-        default: true
+        case .wordToPDF: k == .word
+        case .rename: true
+        default: k != .word
         }
     }
     /// Tools where the PDF page selection matters
@@ -98,6 +104,7 @@ struct Job: Sendable {
     let pages: [Int]
     var parts: [[Int]] = []
     var partNames: [String] = []
+    var outName: String? = nil      // Word to PDF: file name without extension
 }
 
 struct Outcome: Sendable {
@@ -165,6 +172,12 @@ final class Model: ObservableObject {
     @Published var chunkSize = 5
     // Extract images
     @Published var skipSmallImages = true
+    // Word to PDF
+    @Published var wordNaming: WordNaming = .keep
+    @Published var wordPrefix = ""
+    @Published var wordSuffix = ""
+    @Published var wordPattern = tr("Document ###")
+    @Published var wordStart = 1
     // Rename
     @Published var renamePattern = tr("Photo ###")
     @Published var renameStart = 1
@@ -215,11 +228,13 @@ final class Model: ObservableObject {
                 expanded += found.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
             } else { expanded.append(u) }
         }
-        let existing = Set(items.map { $0.url })
-        for u in expanded where !existing.contains(u) {
+        var existing = Set(items.map { $0.url.standardizedFileURL })
+        for u in expanded where existing.insert(u.standardizedFileURL).inserted {
             let ext = u.pathExtension.lowercased()
             if Self.imageExtensions.contains(ext) {
                 items.append(Item(url: u, kind: .image, date: Self.date(of: u, kind: .image)))
+            } else if WordOps.extensions.contains(ext), !u.lastPathComponent.hasPrefix("~$") {   // ~$ = Word lock file
+                items.append(Item(url: u, kind: .word, date: Self.date(of: u, kind: .word)))
             } else if ext == "pdf", let doc = PDFDocument(url: u), doc.pageCount > 0 {
                 items.append(Item(url: u, kind: .pdf, pageCount: doc.pageCount, date: Self.date(of: u, kind: .pdf)))
             }
@@ -230,7 +245,7 @@ final class Model: ObservableObject {
         let p = NSOpenPanel()
         p.allowsMultipleSelection = true
         p.canChooseDirectories = true
-        p.allowedContentTypes = [.image, .pdf, .folder]
+        p.allowedContentTypes = [.image, .pdf, .folder] + WordOps.extensions.compactMap { UTType(filenameExtension: $0) }
         if p.runModal() == .OK { add(p.urls) }
     }
 
@@ -339,17 +354,33 @@ final class Model: ObservableObject {
                 }
                 return Outcome(message: "\(n) image\(n == 1 ? "" : "s") in “\(dir.lastPathComponent)”", files: [dir])
             }
+        case .wordToPDF:
+            guard WordOps.isInstalled else {
+                summary = tr("Microsoft Word is needed for this"); summaryFailed = true
+                return
+            }
+            let wasRunning = WordOps.isRunning
+            WordOps.stuck = false
+            runEach({ job, progress in
+                progress(tr("Word is creating the PDF…"))
+                let out = try WordOps.toPDF(job.url, name: job.outName ?? job.url.deletingPathExtension().lastPathComponent, folder: folder)
+                let pages = PDFDocument(url: out)?.pageCount ?? 0
+                return Outcome(message: out.lastPathComponent + " · " + (pages == 1 ? tr("1 page") : tr("%d pages", pages)), files: [out])
+            }, finally: { if !wasRunning { WordOps.quitIfIdle() } })
         case .combine: combine()
         case .rename: rename()
         }
     }
 
     /// Runs `work` for every eligible file in the background, one after another
-    private func runEach(_ work: @escaping @Sendable (Job, @escaping @Sendable (String) -> Void) throws -> Outcome) {
+    private func runEach(_ work: @escaping @Sendable (Job, @escaping @Sendable (String) -> Void) throws -> Outcome,
+                         finally: @escaping @Sendable () -> Void = {}) {
         let reorder = tool == .reorder
+        let names = tool == .wordToPDF ? wordNames() : [:]
         let jobs = pending.map {
             Job(id: $0.id, url: $0.url, kind: $0.kind,
-                pages: reorder ? $0.order ?? Array(0..<$0.pageCount) : $0.pages, parts: $0.parts, partNames: $0.partNames)
+                pages: reorder ? $0.order ?? Array(0..<$0.pageCount) : $0.pages, parts: $0.parts, partNames: $0.partNames,
+                outName: names[$0.id])
         }
         guard !jobs.isEmpty else { return }
         busy = true
@@ -374,6 +405,7 @@ final class Model: ObservableObject {
                     }
                 }
             }
+            finally()
             await MainActor.run { self.busy = false }
         }
     }
@@ -409,6 +441,25 @@ final class Model: ObservableObject {
                 self.busy = false
             }
         }
+    }
+
+    // MARK: Word to PDF
+
+    /// PDF name (without .pdf) for every Word document, numbered in list order
+    func wordNames() -> [Item.ID: String] {
+        let docs = eligible
+        let last = wordStart + docs.count - 1
+        let pattern = wordPattern.trimmingCharacters(in: .whitespaces)
+        var result: [Item.ID: String] = [:]
+        for (n, it) in docs.enumerated() {
+            let stem = it.url.deletingPathExtension().lastPathComponent
+            switch wordNaming {
+            case .keep: result[it.id] = stem
+            case .affix: result[it.id] = wordPrefix + stem + wordSuffix
+            case .numbered: result[it.id] = pattern.isEmpty ? stem : Self.renamed(pattern, number: wordStart + n, last: last)
+            }
+        }
+        return result
     }
 
     // MARK: Rename
