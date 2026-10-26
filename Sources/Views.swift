@@ -10,7 +10,7 @@ struct ContentView: View {
             List(selection: Binding(get: { Optional(m.tool) }, set: { if let t = $0 { m.tool = t } })) {
                 Section("Convert & Compress") { toolRows([.convert, .compress, .resize]) }
                 Section("Edit") { toolRows([.rotate, .strip, .rename]) }
-                Section("PDF") { toolRows([.combine, .split, .reorder, .extractImages]) }
+                Section("PDF") { toolRows([.wordToPDF, .combine, .split, .reorder, .extractImages]) }
             }
             .disabled(m.busy)
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
@@ -39,7 +39,7 @@ struct ToolView: View {
     @State private var targeted = false
 
     var body: some View {
-        let preview = m.tool == .rename ? m.renamePreview() : [:]
+        let preview = m.tool == .rename ? m.renamePreview() : m.tool == .wordToPDF ? m.wordNames().mapValues { $0 + ".pdf" } : [:]
         VStack(alignment: .leading, spacing: 14) {
             if let it = m.pageItem {
                 // List shrinks to what it needs, the page overview gets the free space
@@ -143,6 +143,7 @@ struct ToolView: View {
         switch m.tool {
         case .resize: "Drop photos or folders here"
         case .split, .reorder, .extractImages: "Drop PDFs here"
+        case .wordToPDF: "Drop Word documents or folders here"
         default: "Drop photos, PDFs or folders here"
         }
     }
@@ -150,7 +151,7 @@ struct ToolView: View {
     @ViewBuilder func row(_ it: Item, preview: [Item.ID: String]) -> some View {
         let usable = m.tool.accepts(it.kind)
         HStack(spacing: 8) {
-            Image(systemName: it.done && usable ? "checkmark.circle.fill" : it.failed ? "xmark.octagon.fill" : it.kind == .pdf ? "doc.richtext" : "photo")
+            Image(systemName: it.done && usable ? "checkmark.circle.fill" : it.failed ? "xmark.octagon.fill" : it.kind == .pdf ? "doc.richtext" : it.kind == .word ? "doc.text" : "photo")
                 .foregroundStyle(it.done && usable ? .green : it.failed ? .red : .secondary)
                 .frame(width: 18)
                 .accessibilityHidden(true)
@@ -165,7 +166,7 @@ struct ToolView: View {
             } else if usable && m.tool == .reorder {
                 Text(it.orderSummary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            if m.tool == .rename, !it.done, let new = preview[it.id], new != it.url.lastPathComponent {
+            if m.tool == .rename || m.tool == .wordToPDF, usable, !it.done, let new = preview[it.id], new != it.url.lastPathComponent {
                 Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
                 Text(new).foregroundStyle(Color.accentColor).lineLimit(1).truncationMode(.middle)
             }
@@ -350,11 +351,37 @@ struct ToolView: View {
         case .reorder:
             Text("Drag the pages above into the order you want. Click another PDF in the list to arrange its pages. The PDF is saved as a new file.")
                 .font(.caption).foregroundStyle(.secondary)
+        case .wordToPDF:
+            HStack(spacing: 10) {
+                Picker("PDF names", selection: $m.wordNaming) {
+                    ForEach(WordNaming.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                switch m.wordNaming {
+                case .keep:
+                    EmptyView()
+                case .affix:
+                    TextField("Text before", text: $m.wordPrefix, prompt: Text("Before")).labelsHidden().frame(width: 110)
+                    Text("name").foregroundStyle(.secondary)
+                    TextField("Text after", text: $m.wordSuffix, prompt: Text("After")).labelsHidden().frame(width: 110)
+                case .numbered:
+                    TextField("New name", text: $m.wordPattern, prompt: Text("Document ###")).labelsHidden().frame(width: 180)
+                    Stepper("starting at \(m.wordStart)", value: $m.wordStart, in: 0...99999)
+                }
+                Spacer()
+            }
+            Text(wordHint).font(.caption).foregroundStyle(.secondary)
         case .extractImages:
             Toggle("Skip small images (icons, lines, logos under \(PDFImages.minSide) px)", isOn: $m.skipSmallImages)
             Text("Pictures are saved at their original resolution into a new folder. JPEGs are copied unchanged, others are saved as PNG.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    var wordHint: String {
+        m.wordNaming == .numbered
+            ? "# is replaced by the number (### → 001), in list order. Drag to reorder or use Sort."
+            : "Microsoft Word makes the PDFs, so they look exactly like the document in Word. Documents you have open in Word stay open."
     }
 
     var splitHint: String {

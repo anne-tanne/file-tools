@@ -43,6 +43,11 @@ enum L10n {
         "Combine to PDF": ("Zu PDF kombinieren", "Combiner en PDF"),
         "Split PDF": ("PDF teilen", "Diviser un PDF"),
         "Reorder Pages": ("Seiten ordnen", "Réordonner les pages"),
+        "Word to PDF": ("Word zu PDF", "Word en PDF"),
+        "Save Word documents as PDFs with the exact Word layout":
+            ("Word-Dokumente als PDF sichern, mit genau dem Layout aus Word",
+             "Enregistrer des documents Word en PDF avec la mise en page exacte de Word"),
+        "Create PDFs": ("PDFs erstellen", "Créer les PDF"),
         "Turn photos into another format, or PDF pages into images":
             ("Fotos in ein anderes Format umwandeln oder PDF-Seiten in Bilder",
              "Convertir des photos dans un autre format, ou des pages PDF en images"),
@@ -112,6 +117,42 @@ enum L10n {
         "Renamed %d files": ("%d Dateien umbenannt", "%d fichiers renommés"),
         "Undo failed: ": ("Rückgängig fehlgeschlagen: ", "Échec de l'annulation : "),
         "Original names restored": ("Ursprüngliche Namen wiederhergestellt", "Noms d'origine rétablis"),
+
+        // Word to PDF
+        "Original name": ("Originalname", "Nom d'origine"),
+        "Add text": ("Text ergänzen", "Ajouter du texte"),
+        "Numbered": ("Nummeriert", "Numérotés"),
+        "Document ###": ("Dokument ###", "Document ###"),
+        "PDF names": ("PDF-Namen", "Noms des PDF"),
+        "Text before": ("Text davor", "Texte avant"),
+        "Text after": ("Text danach", "Texte après"),
+        "Before": ("Davor", "Avant"),
+        "After": ("Danach", "Après"),
+        "name": ("Name", "nom"),
+        "1 page": ("1 Seite", "1 page"),
+        "%d pages": ("%d Seiten", "%d pages"),
+        "Word is creating the PDF…": ("Word erstellt das PDF…", "Word crée le PDF…"),
+        "Drop Word documents or folders here":
+            ("Word-Dokumente oder Ordner hierher ziehen", "Déposez des documents Word ou des dossiers ici"),
+        "Microsoft Word makes the PDFs, so they look exactly like the document in Word. Documents you have open in Word stay open.":
+            ("Microsoft Word erstellt die PDFs, sie sehen also genau gleich aus wie das Dokument in Word. In Word geöffnete Dokumente bleiben offen.",
+             "Microsoft Word crée les PDF, ils ont donc exactement l'aspect du document dans Word. Les documents ouverts dans Word restent ouverts."),
+        "# is replaced by the number (### → 001), in list order. Drag to reorder or use Sort.":
+            ("# wird durch die Nummer ersetzt (### → 001), in der Reihenfolge der Liste. Zum Umordnen ziehen oder «Sortieren» verwenden.",
+             "# est remplacé par le numéro (### → 001), dans l'ordre de la liste. Glissez pour réordonner ou utilisez Trier."),
+        "Microsoft Word is needed for this": ("Dafür wird Microsoft Word benötigt", "Microsoft Word est nécessaire pour cela"),
+        "Word didn't respond. Is the file password protected, or is a dialog open in Word?":
+            ("Word reagiert nicht. Ist die Datei passwortgeschützt oder ist in Word ein Dialog offen?",
+             "Word ne répond pas. Le fichier est-il protégé par un mot de passe, ou une boîte de dialogue est-elle ouverte dans Word ?"),
+        "Word didn't open the file. Is a dialog open in Word?":
+            ("Word hat die Datei nicht geöffnet. Ist in Word ein Dialog offen?",
+             "Word n'a pas ouvert le fichier. Une boîte de dialogue est-elle ouverte dans Word ?"),
+        "Not allowed to control Word: turn on File Tools › Microsoft Word in System Settings › Privacy & Security › Automation":
+            ("Keine Berechtigung für Word: In den Systemeinstellungen › Datenschutz & Sicherheit › Automation «File Tools › Microsoft Word» einschalten",
+             "Pas autorisé à contrôler Word : activez File Tools › Microsoft Word dans Réglages Système › Confidentialité et sécurité › Automatisation"),
+        "Word: ": ("Word: ", "Word : "),
+        "Not converted: Word wasn't responding":
+            ("Nicht konvertiert: Word hat nicht reagiert", "Non converti : Word ne répondait pas"),
 
         // Engine messages
         "Already under %@": ("Bereits unter %@", "Déjà sous %@"),

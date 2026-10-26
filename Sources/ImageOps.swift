@@ -238,7 +238,28 @@ enum ImageOps {
             try? FileManager.default.removeItem(at: out)
             throw ConvError(err?.takeRetainedValue().localizedDescription ?? tr("Writing failed"))
         }
+        // HEICs written by ImageIO keep their XMP block (with the date) through the lossless copy,
+        // so if anything is left, save the pixels again with only the orientation
+        if mode == .all, hasPersonalInfo(out) {
+            var p: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 0.92]
+            p[kCGImagePropertyOrientation] = properties(s)[kCGImagePropertyOrientation]
+            guard let img = CGImageSourceCreateImageAtIndex(s, 0, nil) else { throw ConvError(tr("File can't be read")) }
+            try write(out, type: type) { CGImageDestinationAddImage($0, img, p as CFDictionary) }
+        }
         return out
+    }
+
+    /// True if the file still has metadata beyond what describes the pixels themselves
+    static func hasPersonalInfo(_ url: URL) -> Bool {
+        guard let s = CGImageSourceCreateWithURL(url as CFURL, nil), let meta = CGImageSourceCopyMetadataAtIndex(s, 0, nil) else { return false }
+        let harmless: Set = ["Orientation", "TileWidth", "TileLength", "ColorSpace", "PixelXDimension", "PixelYDimension",
+                             "hasXMP", "ResolutionUnit", "XResolution", "YResolution"]
+        var found = false
+        CGImageMetadataEnumerateTagsUsingBlock(meta, nil, [kCGImageMetadataEnumerateRecursively: true] as CFDictionary) { _, tag in
+            if let name = CGImageMetadataTagCopyName(tag) as String?, !harmless.contains(name) { found = true; return false }
+            return true
+        }
+        return found
     }
 
     // MARK: For PDFs
