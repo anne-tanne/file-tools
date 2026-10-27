@@ -18,17 +18,17 @@ struct PagePicker: View {
             HStack {
                 Text(url.lastPathComponent).font(.headline).lineLimit(1)
                 Spacer()
-                Text("\(selected.isEmpty ? pageCount : selected.count) of \(pageCount) selected").foregroundStyle(.secondary)
+                Text(tr("%d of %d selected", selected.isEmpty ? pageCount : selected.count, pageCount)).foregroundStyle(.secondary)
             }
             HStack {
-                TextField("Pages, e.g. 1-3, 5, 8-", text: $rangeText)
+                TextField(tr("Pages, e.g. 1-3, 5, 8-"), text: $rangeText)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(applyRange)
                     .foregroundStyle(rangeError ? .red : .primary)
-                Button("Apply", action: applyRange)
+                Button(tr("Apply"), action: applyRange)
                 Divider().frame(height: 18)
-                Button("All") { selected = Set(0..<pageCount); rangeText = "" }
-                Button("None") { selected = []; rangeText = "" }
+                Button(tr("All")) { selected = Set(0..<pageCount); rangeText = "" }
+                Button(tr("None")) { selected = []; rangeText = "" }
             }
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 14)], spacing: 14) {
@@ -52,7 +52,7 @@ struct PagePicker: View {
                         .contentShape(Rectangle())
                         .onTapGesture { if on { selected.remove(i) } else { selected.insert(i) }; rangeText = rangeString(selected) }
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Page \(i + 1)")
+                        .accessibilityLabel(tr("Page %d", i + 1))
                         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
                         .accessibilityAction { if on { selected.remove(i) } else { selected.insert(i) }; rangeText = rangeString(selected) }
                         .task { await loadThumb(i) }
@@ -60,7 +60,7 @@ struct PagePicker: View {
                 }
                 .padding(4)
             }
-            Text("No pages selected = all pages are used").font(.caption).foregroundStyle(.secondary)
+            Text(tr("No pages selected = all pages are used")).font(.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { rangeText = rangeString(selected) }
@@ -133,35 +133,35 @@ struct PartsPicker: View {
             HStack {
                 Text(url.lastPathComponent).font(.headline).lineLimit(1)
                 Spacer()
-                Text("\(assignedCount) of \(pageCount) pages selected").foregroundStyle(.secondary)
+                Text(tr("%d of %d pages selected", assignedCount, pageCount)).foregroundStyle(.secondary)
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(parts.indices, id: \.self) { n in chip(n) }
                     Button { parts.append([]); names.append(""); active = parts.count - 1; lastClicked = nil } label: {
-                        Label("New PDF", systemImage: "plus")
+                        Label(tr("New PDF"), systemImage: "plus")
                     }
                     .controlSize(.small)
                 }
                 .padding(2)
             }
             HStack {
-                TextField("Pages for PDF \(active + 1), e.g. 1-3, 5", text: $rangeText)
+                TextField(tr("Pages for PDF %d, e.g. 1-3, 5", active + 1), text: $rangeText)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(applyRange)
                     .foregroundStyle(rangeError ? .red : .primary)
-                Button("Add", action: applyRange)
+                Button(tr("Add"), action: applyRange)
                 Divider().frame(height: 18)
-                Button("All Remaining") { assign(Set(0..<pageCount).filter { part(of: $0) == nil }) }
+                Button(tr("All Remaining")) { assign(Set(0..<pageCount).filter { part(of: $0) == nil }) }
                     .disabled(assignedCount == pageCount)
-                Button("Clear All") { parts = [[]]; names = [""]; active = 0; lastClicked = nil }
+                Button(tr("Clear All")) { parts = [[]]; names = [""]; active = 0; lastClicked = nil }
             }
             HStack {
-                Text("Name")
-                TextField("File name for PDF \(active + 1)", text: $names[active],
-                          prompt: Text(parts[active].isEmpty ? "Optional" : defaultName(active)))
+                Text(tr("Name"))
+                TextField(tr("File name for PDF %d", active + 1), text: $names[active],
+                          prompt: Text(parts[active].isEmpty ? tr("Optional") : defaultName(active)))
                     .textFieldStyle(.roundedBorder).labelsHidden()
-                Text(".pdf").foregroundStyle(.secondary)
+                Text(tr(".pdf")).foregroundStyle(.secondary)
             }
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 14)], spacing: 14) {
@@ -169,7 +169,7 @@ struct PartsPicker: View {
                 }
                 .padding(4)
             }
-            Text("Click pages to add them to the new PDF, shift-click for a range. Use New PDF to make several PDFs at once, each in its own colour.")
+            Text(tr("Click pages to add them to the new PDF, shift-click for a range. Use New PDF to make several PDFs at once, each in its own colour."))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -185,8 +185,8 @@ struct PartsPicker: View {
                 .fontWeight(on ? .semibold : .regular).lineLimit(1).truncationMode(.middle).frame(maxWidth: 180)
             Text("\(parts[n].count)").font(.caption).foregroundStyle(.secondary).monospacedDigit()
             if on && parts.count > 1 {
-                Button { removePart(n) } label: { Label("Remove PDF \(n + 1)", systemImage: "xmark.circle.fill") }
-                    .labelStyle(.iconOnly).buttonStyle(.borderless).foregroundStyle(.secondary).help("Remove this PDF")
+                Button { removePart(n) } label: { Label(tr("Remove PDF %d", n + 1), systemImage: "xmark.circle.fill") }
+                    .labelStyle(.iconOnly).buttonStyle(.borderless).foregroundStyle(.secondary).help(tr("Remove this PDF"))
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
@@ -271,11 +271,11 @@ struct CompareView: View {
     var body: some View {
         VStack(spacing: 12) {
             HStack {
-                Label("Original · \(fmtSize(fileSize(original)))", systemImage: "arrow.left")
+                Label(tr("Original · %@", fmtSize(fileSize(original))), systemImage: "arrow.left")
                 Spacer()
-                Text("Drag to compare").font(.caption).foregroundStyle(.secondary)
+                Text(tr("Drag to compare")).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Label("Compressed · \(fmtSize(fileSize(compressed)))", systemImage: "arrow.right")
+                Label(tr("Compressed · %@", fmtSize(fileSize(compressed))), systemImage: "arrow.right")
                     .labelStyle(TrailingIcon())
             }
             .font(.headline)
@@ -309,17 +309,17 @@ struct CompareView: View {
 
             HStack {
                 if isPDF && pageCount > 1 {
-                    Stepper("Page \(page + 1) of \(pageCount)", value: $page, in: 0...(pageCount - 1))
+                    Stepper(tr("Page %d of %d", page + 1, pageCount), value: $page, in: 0...(pageCount - 1))
                 }
-                Picker("Zoom", selection: $zoom) {
-                    Text("Fit").tag(CGFloat(1))
-                    Text("2×").tag(CGFloat(2))
-                    Text("4×").tag(CGFloat(4))
+                Picker(tr("Zoom"), selection: $zoom) {
+                    Text(tr("Fit")).tag(CGFloat(1))
+                    Text(tr("2×")).tag(CGFloat(2))
+                    Text(tr("4×")).tag(CGFloat(4))
                 }
                 .pickerStyle(.segmented).fixedSize()
                 Spacer()
-                Button("Delete Compressed Copy", role: .destructive) { onDiscard(); dismiss() }
-                Button("Keep") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button(tr("Delete Compressed Copy"), role: .destructive) { onDiscard(); dismiss() }
+                Button(tr("Keep")) { dismiss() }.keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)

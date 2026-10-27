@@ -33,7 +33,7 @@ enum Tool: String, CaseIterable, Identifiable, Titled {
         case .resize: tr("Scale photos down to a given size")
         case .rotate: tr("Turn photos or PDF pages")
         case .strip: tr("Remove camera, date and location info before sharing")
-        case .rename: tr("Give a set of files consistent, numbered names")
+        case .rename: tr("Change file names: add or replace text, or number them")
         case .combine: tr("Put photos and PDFs together into one PDF")
         case .split: tr("Take pages out of a PDF or cut it into parts")
         case .reorder: tr("Drag PDF pages into a new order")
@@ -43,13 +43,13 @@ enum Tool: String, CaseIterable, Identifiable, Titled {
     }
     var action: String {
         switch self {
-        case .strip: "Remove Info"
-        case .combine: "Create PDF"
-        case .split: "Split"
-        case .reorder: "Save"
-        case .extractImages: "Extract"
-        case .wordToPDF: "Create PDFs"
-        default: rawValue
+        case .strip: tr("Remove Info")
+        case .combine: tr("Create PDF")
+        case .split: tr("Split")
+        case .reorder: tr("Save")
+        case .extractImages: tr("Extract")
+        case .wordToPDF: tr("Create PDFs")
+        default: title
         }
     }
     func accepts(_ k: Kind) -> Bool {
@@ -173,11 +173,7 @@ final class Model: ObservableObject {
     // Extract images
     @Published var skipSmallImages = true
     // Word to PDF
-    @Published var wordNaming: WordNaming = .keep
-    @Published var wordPrefix = ""
-    @Published var wordSuffix = ""
-    @Published var wordPattern = tr("Document ###")
-    @Published var wordStart = 1
+    @Published var wordRule = NameRule(mode: .keep, pattern: tr("Document ###"))
     @Published var wordFinal = true
     @Published var wordUpdateFields = true
     @Published var wordCombine = false
@@ -185,8 +181,7 @@ final class Model: ObservableObject {
     @Published var wordCompress = false
     @Published var wordLevel: Level = .balanced
     // Rename
-    @Published var renamePattern = tr("Photo ###")
-    @Published var renameStart = 1
+    @Published var renameRule = NameRule(mode: .numbered, pattern: tr("Photo ###"))
     @Published var lastRename: [(from: URL, to: URL)] = []
 
     var hasPDF: Bool { items.contains { $0.kind == .pdf } }
@@ -201,6 +196,16 @@ final class Model: ObservableObject {
     var pending: [Item] { eligible.filter { !$0.done } }
     var canRun: Bool { tool == .rename ? renameCount > 0 : !eligible.isEmpty }
     func clearList() { items.removeAll(); summary = nil; lastRename = [] }
+
+    /// Default texts follow the new language unless they were edited
+    func languageChanged(from old: Lang) {
+        func follow(_ s: inout String, _ key: String) { if s == L10n.text(key, old) { s = tr(key) } }
+        follow(&renameRule.pattern, "Photo ###")
+        follow(&wordRule.pattern, "Document ###")
+        follow(&combinedName, "Combined")
+        follow(&wordCombinedName, "Combined")
+        for i in items.indices { follow(&items[i].status, "Ready") }
+    }
 
     // MARK: Files
 
@@ -394,7 +399,7 @@ final class Model: ObservableObject {
     private func runEach(_ work: @escaping @Sendable (Job, @escaping @Sendable (String) -> Void) throws -> Outcome,
                          finally: @escaping @Sendable () -> Void = {}) {
         let reorder = tool == .reorder
-        let names = tool == .wordToPDF ? wordNames() : [:]
+        let names = tool == .wordToPDF ? wordPDFNames() : [:]
         let jobs = pending.map {
             Job(id: $0.id, url: $0.url, kind: $0.kind,
                 pages: reorder ? $0.order ?? Array(0..<$0.pageCount) : $0.pages, parts: $0.parts, partNames: $0.partNames,
@@ -518,46 +523,25 @@ final class Model: ObservableObject {
         }
     }
 
-    /// PDF name (without .pdf) for every Word document, numbered in list order
-    func wordNames() -> [Item.ID: String] {
+    /// PDF name (without .pdf) for every Word document, in list order
+    func wordPDFNames() -> [Item.ID: String] {
         let docs = eligible
-        let last = wordStart + docs.count - 1
-        let pattern = wordPattern.trimmingCharacters(in: .whitespaces)
         var result: [Item.ID: String] = [:]
         for (n, it) in docs.enumerated() {
-            let stem = it.url.deletingPathExtension().lastPathComponent
-            switch wordNaming {
-            case .keep: result[it.id] = stem
-            case .affix: result[it.id] = wordPrefix + stem + wordSuffix
-            case .numbered: result[it.id] = pattern.isEmpty ? stem : Self.renamed(pattern, number: wordStart + n, last: last)
-            }
+            result[it.id] = wordRule.apply(it.url.deletingPathExtension().lastPathComponent, index: n, count: docs.count)
         }
         return result
     }
 
     // MARK: Rename
 
-    /// "Photo ###" + 7 → "Photo 007"; without # the number is appended
-    static func renamed(_ pattern: String, number: Int, last: Int) -> String {
-        let name: String
-        if let r = pattern.range(of: "#+", options: .regularExpression) {
-            let width = pattern.distance(from: r.lowerBound, to: r.upperBound)
-            name = pattern.replacingCharacters(in: r, with: String(format: "%0\(width)d", number))
-        } else {
-            name = pattern + " " + String(format: "%0\(max(2, String(last).count))d", number)
-        }
-        return name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-    }
-
     /// New file name for every file, in list order
     func renamePreview() -> [Item.ID: String] {
-        let pattern = renamePattern.trimmingCharacters(in: .whitespaces)
-        guard !pattern.isEmpty else { return [:] }
-        let last = renameStart + items.count - 1
         var result: [Item.ID: String] = [:]
         for (n, it) in items.enumerated() {
             let ext = it.url.pathExtension
-            result[it.id] = Self.renamed(pattern, number: renameStart + n, last: last) + (ext.isEmpty ? "" : "." + ext)
+            let stem = it.url.deletingPathExtension().lastPathComponent
+            result[it.id] = renameRule.apply(stem, index: n, count: items.count) + (ext.isEmpty ? "" : "." + ext)
         }
         return result
     }

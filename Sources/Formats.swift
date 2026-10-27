@@ -88,9 +88,44 @@ enum PageSize: String, CaseIterable, Identifiable, Sendable, Titled {
     var id: String { rawValue }
 }
 
-enum WordNaming: String, CaseIterable, Identifiable, Sendable, Titled {
-    case keep = "Original name", affix = "Add text", numbered = "Numbered"
+enum NameMode: String, CaseIterable, Identifiable, Sendable, Titled {
+    case keep = "Keep name", add = "Add text", replace = "Replace text", numbered = "New name + number"
     var id: String { rawValue }
+}
+
+/// How new file names are made (Rename, Word to PDF); works on the name without extension
+struct NameRule: Sendable {
+    var mode: NameMode
+    var before = "", after = ""          // Add text
+    var find = "", replacement = ""      // Replace text
+    var pattern: String                  // New name + number: "Photo ###"
+    var start = 1
+
+    /// New name for the file at `index` (0-based, list order) of `count` files
+    func apply(_ stem: String, index: Int, count: Int) -> String {
+        let name: String
+        switch mode {
+        case .keep: name = stem
+        case .add: name = before + stem + after
+        case .replace:
+            name = find.isEmpty ? stem : stem.replacingOccurrences(of: find, with: replacement, options: .caseInsensitive)
+        case .numbered:
+            let p = pattern.trimmingCharacters(in: .whitespaces)
+            name = p.isEmpty ? stem : Self.numbered(p, number: start + index, last: start + count - 1)
+        }
+        let clean = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespaces)
+        return clean.isEmpty ? stem : clean
+    }
+
+    /// "Photo ###" + 7 → "Photo 007"; without # the number is appended
+    static func numbered(_ pattern: String, number: Int, last: Int) -> String {
+        if let r = pattern.range(of: "#+", options: .regularExpression) {
+            let width = pattern.distance(from: r.lowerBound, to: r.upperBound)
+            return pattern.replacingCharacters(in: r, with: String(format: "%0\(width)d", number))
+        }
+        return pattern + " " + String(format: "%0\(max(2, String(last).count))d", number)
+    }
 }
 
 enum SplitMode: String, CaseIterable, Identifiable, Sendable, Titled {

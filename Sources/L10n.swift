@@ -23,6 +23,13 @@ enum L10n {
         return Lang(rawValue: String(sys)) ?? .en
     }()
 
+    /// Switches the interface language. AppleLanguages makes macOS's own menus follow after a restart.
+    static func set(_ new: Lang) {
+        lang = new
+        UserDefaults.standard.set([new.rawValue], forKey: "AppleLanguages")
+        UserDefaults.standard.set(new.rawValue, forKey: defaultsKey)   // last: views observe this key
+    }
+
     static func text(_ key: String, _ lang: Lang) -> String {
         switch lang {
         case .en: key
@@ -59,17 +66,17 @@ enum L10n {
         "Turn photos or PDF pages": ("Fotos oder PDF-Seiten drehen", "Faire pivoter des photos ou des pages PDF"),
         "Remove camera, date and location info before sharing":
             ("Kamera-, Datums- und Ortsangaben vor dem Teilen entfernen",
-             "Supprimer les infos d'appareil, de date et de lieu avant de partager"),
-        "Give a set of files consistent, numbered names":
-            ("Mehreren Dateien einheitliche, nummerierte Namen geben",
-             "Donner des noms cohérents et numérotés à un ensemble de fichiers"),
+             "Supprimer les infos d’appareil, de date et de lieu avant de partager"),
+        "Change file names: add or replace text, or number them":
+            ("Dateinamen ändern: Text hinzufügen oder ersetzen, oder durchnummerieren",
+             "Modifier les noms de fichiers : ajouter ou remplacer du texte, ou les numéroter"),
         "Put photos and PDFs together into one PDF":
             ("Fotos und PDFs zu einem PDF zusammenfügen", "Réunir des photos et des PDF en un seul PDF"),
         "Take pages out of a PDF or cut it into parts":
             ("Seiten aus einem PDF herausnehmen oder es in Teile zerlegen",
-             "Extraire des pages d'un PDF ou le découper en parties"),
+             "Extraire des pages d’un PDF ou le découper en parties"),
         "Drag PDF pages into a new order":
-            ("PDF-Seiten in eine neue Reihenfolge ziehen", "Glisser les pages d'un PDF dans un nouvel ordre"),
+            ("PDF-Seiten in eine neue Reihenfolge ziehen", "Glisser les pages d’un PDF dans un nouvel ordre"),
         "Create PDF": ("PDF erstellen", "Créer le PDF"),
         "Split": ("Teilen", "Diviser"),
         "Save": ("Sichern", "Enregistrer"),
@@ -85,14 +92,14 @@ enum L10n {
         "%d of %d pages": ("%d von %d Seiten", "%1$d pages sur %2$d"),
         "1 PDF": ("1 PDF", "1 PDF"),
         "%d PDFs": ("%d PDFs", "%d PDF"),
-        "Original order": ("Ursprüngliche Reihenfolge", "Ordre d'origine"),
-        "New order: ": ("Neue Reihenfolge: ", "Nouvel ordre : "),
+        "Original order": ("Ursprüngliche Reihenfolge", "Ordre d’origine"),
+        "New order: ": ("Neue Reihenfolge: ", "Nouvel ordre : "),
         "Ready": ("Bereit", "Prêt"),
         "Working…": ("In Arbeit…", "En cours…"),
         "Waiting…": ("Wartet…", "En attente…"),
         "Adding…": ("Wird hinzugefügt…", "Ajout…"),
         "Added": ("Hinzugefügt", "Ajouté"),
-        "Error: ": ("Fehler: ", "Erreur : "),
+        "Error: ": ("Fehler: ", "Erreur : "),
         "Page %d of %d…": ("Seite %d von %d…", "Page %d sur %d…"),
         "%d images": ("%d Bilder", "%d images"),
         ", smallest possible": (", kleinstmöglich", ", taille minimale atteinte"),
@@ -102,57 +109,81 @@ enum L10n {
 
         // Combine
         "Combined": ("Kombiniert", "Combiné"),
-        "Created “%@”: %d pages, %@": ("«%@» erstellt: %d Seiten, %@", "« %@ » créé : %d pages, %@"),
+        "Created “%@”: %d pages, %@": ("«%@» erstellt: %d Seiten, %@", "« %@ » créé : %d pages, %@"),
         "Nothing to combine": ("Nichts zum Kombinieren", "Rien à combiner"),
 
         // Rename
         "Photo ###": ("Foto ###", "Photo ###"),
-        "“%@” already exists": ("«%@» existiert bereits", "« %@ » existe déjà"),
+        "“%@” already exists": ("«%@» existiert bereits", "« %@ » existe déjà"),
         "Nothing renamed: a file with one of the new names already exists":
             ("Nichts umbenannt: Eine Datei mit einem der neuen Namen existiert bereits",
-             "Rien n'a été renommé : un fichier portant l'un des nouveaux noms existe déjà"),
-        "Nothing renamed: ": ("Nichts umbenannt: ", "Rien n'a été renommé : "),
-        "✓ was “%@”": ("✓ war «%@»", "✓ anciennement « %@ »"),
+             "Rien n’a été renommé : un fichier portant l’un des nouveaux noms existe déjà"),
+        "Nothing renamed: ": ("Nichts umbenannt: ", "Rien n’a été renommé : "),
+        "✓ was “%@”": ("✓ war «%@»", "✓ anciennement « %@ »"),
         "Renamed 1 file": ("1 Datei umbenannt", "1 fichier renommé"),
         "Renamed %d files": ("%d Dateien umbenannt", "%d fichiers renommés"),
-        "Undo failed: ": ("Rückgängig fehlgeschlagen: ", "Échec de l'annulation : "),
-        "Original names restored": ("Ursprüngliche Namen wiederhergestellt", "Noms d'origine rétablis"),
+        "Undo failed: ": ("Rückgängig fehlgeschlagen: ", "Échec de l’annulation : "),
+        "Original names restored": ("Ursprüngliche Namen wiederhergestellt", "Noms d’origine rétablis"),
 
-        // Word to PDF
-        "Original name": ("Originalname", "Nom d'origine"),
-        "Add text": ("Text ergänzen", "Ajouter du texte"),
-        "Numbered": ("Nummeriert", "Numérotés"),
+        // New names (Rename, Word to PDF)
+        "Keep name": ("Name behalten", "Garder le nom"),
+        "Add text": ("Text hinzufügen", "Ajouter du texte"),
+        "Replace text": ("Text ersetzen", "Remplacer du texte"),
+        "New name + number": ("Neuer Name + Nummer", "Nouveau nom + numéro"),
         "Document ###": ("Dokument ###", "Document ###"),
-        "PDF names": ("PDF-Namen", "Noms des PDF"),
-        "Text before": ("Text davor", "Texte avant"),
-        "Text after": ("Text danach", "Texte après"),
+        "Text before the name": ("Text vor dem Namen", "Texte avant le nom"),
+        "Text after the name": ("Text nach dem Namen", "Texte après le nom"),
         "Before": ("Davor", "Avant"),
         "After": ("Danach", "Après"),
-        "name": ("Name", "nom"),
+        "+ name +": ("+ Name +", "+ nom +"),
+        "Replace": ("Ersetze", "Remplacer"),
+        "with": ("durch", "par"),
+        "Text to replace": ("Zu ersetzender Text", "Texte à remplacer"),
+        "Replacement text": ("Ersatztext", "Texte de remplacement"),
+        "Old text": ("Alter Text", "Ancien texte"),
+        "New text": ("Neuer Text", "Nouveau texte"),
+        "first number %d": ("erste Nummer %d", "premier numéro %d"),
+        "Report": ("Bericht", "Rapport"),
+        "Adds text in front of and/or behind the current name: “%@” becomes “%@”.":
+            ("Fügt Text vor und/oder nach dem bisherigen Namen ein: «%@» wird zu «%@».",
+             "Ajoute du texte avant et/ou après le nom actuel : « %@ » devient « %@ »."),
+        "Replaces a word or part of the name wherever it appears.":
+            ("Ersetzt ein Wort oder einen Teil des Namens, wo immer er vorkommt.",
+             "Remplace un mot ou une partie du nom partout où il apparaît."),
+        "“%@” becomes “%@”.": ("«%@» wird zu «%@».", "« %@ » devient « %@ »."),
+        "Upper/lower case doesn't matter. Leave “New text” empty to delete the text.":
+            ("Gross-/Kleinschreibung spielt keine Rolle. «Neuer Text» leer lassen, um den Text zu löschen.",
+             "Majuscules et minuscules indifférentes. Laissez « Nouveau texte » vide pour supprimer le texte."),
+        "Example: “%@”, “%@”, …": ("Beispiel: «%@», «%@», …", "Exemple : « %@ », « %@ », …"),
+        "The whole name is replaced. # marks where the number goes (### = 3 digits).":
+            ("Der ganze Name wird ersetzt. # zeigt, wo die Nummer steht (### = 3 Stellen).",
+             "Tout le nom est remplacé. # indique où va le numéro (### = 3 chiffres)."),
+        "Files are renamed in place. The arrow in the list shows the new name.":
+            ("Die Dateien werden direkt umbenannt. Der Pfeil in der Liste zeigt den neuen Namen.",
+             "Les fichiers sont renommés sur place. La flèche dans la liste indique le nouveau nom."),
+
+        // Word to PDF
+        "The PDFs get the names of the Word documents. Microsoft Word makes them, so they look exactly like the document in Word.":
+            ("Die PDFs erhalten die Namen der Word-Dokumente. Microsoft Word erstellt sie, sie sehen also genau gleich aus wie in Word.",
+             "Les PDF portent le nom des documents Word. Microsoft Word les crée, ils sont donc identiques au document dans Word."),
         "1 page": ("1 Seite", "1 page"),
         "%d pages": ("%d Seiten", "%d pages"),
         "Word is creating the PDF…": ("Word erstellt das PDF…", "Word crée le PDF…"),
         "Drop Word documents or folders here":
             ("Word-Dokumente oder Ordner hierher ziehen", "Déposez des documents Word ou des dossiers ici"),
-        "Microsoft Word makes the PDFs, so they look exactly like the document in Word. Documents you have open in Word stay open.":
-            ("Microsoft Word erstellt die PDFs, sie sehen also genau gleich aus wie das Dokument in Word. In Word geöffnete Dokumente bleiben offen.",
-             "Microsoft Word crée les PDF, ils ont donc exactement l'aspect du document dans Word. Les documents ouverts dans Word restent ouverts."),
-        "# is replaced by the number (### → 001), in list order. Drag to reorder or use Sort.":
-            ("# wird durch die Nummer ersetzt (### → 001), in der Reihenfolge der Liste. Zum Umordnen ziehen oder «Sortieren» verwenden.",
-             "# est remplacé par le numéro (### → 001), dans l'ordre de la liste. Glissez pour réordonner ou utilisez Trier."),
         "Microsoft Word is needed for this": ("Dafür wird Microsoft Word benötigt", "Microsoft Word est nécessaire pour cela"),
         "Word didn't respond. Is the file password protected, or is a dialog open in Word?":
             ("Word reagiert nicht. Ist die Datei passwortgeschützt oder ist in Word ein Dialog offen?",
-             "Word ne répond pas. Le fichier est-il protégé par un mot de passe, ou une boîte de dialogue est-elle ouverte dans Word ?"),
+             "Word ne répond pas. Le fichier est-il protégé par un mot de passe, ou une boîte de dialogue est-elle ouverte dans Word ?"),
         "Word didn't open the file. Is a dialog open in Word?":
             ("Word hat die Datei nicht geöffnet. Ist in Word ein Dialog offen?",
-             "Word n'a pas ouvert le fichier. Une boîte de dialogue est-elle ouverte dans Word ?"),
+             "Word n’a pas ouvert le fichier. Une boîte de dialogue est-elle ouverte dans Word ?"),
         "Not allowed to control Word: turn on File Tools › Microsoft Word in System Settings › Privacy & Security › Automation":
             ("Keine Berechtigung für Word: In den Systemeinstellungen › Datenschutz & Sicherheit › Automation «File Tools › Microsoft Word» einschalten",
-             "Pas autorisé à contrôler Word : activez File Tools › Microsoft Word dans Réglages Système › Confidentialité et sécurité › Automatisation"),
-        "Word: ": ("Word: ", "Word : "),
+             "Pas autorisé à contrôler Word : activez File Tools › Microsoft Word dans Réglages Système › Confidentialité et sécurité › Automatisation"),
+        "Word: ": ("Word: ", "Word : "),
         "Not converted: Word wasn't responding":
-            ("Nicht konvertiert: Word hat nicht reagiert", "Non converti : Word ne répondait pas"),
+            ("Nicht konvertiert: Word hat nicht reagiert", "Non converti : Word ne répondait pas"),
         "Combine into one PDF": ("Zu einem PDF zusammenfügen", "Réunir en un seul PDF"),
         "Without tracked changes and comments": ("Ohne Änderungen und Kommentare", "Sans modifications suivies ni commentaires"),
         "Accepts all tracked changes and removes comments in the copy Word works on. The Word document itself stays unchanged.":
@@ -172,23 +203,23 @@ enum L10n {
         "Trying step %d of %d…": ("Versuch %d von %d…", "Essai %d sur %d…"),
         "Already small, original kept": ("Bereits klein, Original behalten", "Déjà léger, original conservé"),
         "File can't be read": ("Datei kann nicht gelesen werden", "Impossible de lire le fichier"),
-        "Image can't be read": ("Bild kann nicht gelesen werden", "Impossible de lire l'image"),
-        "Can't write to destination": ("Ziel kann nicht beschrieben werden", "Impossible d'écrire à la destination"),
-        "Writing failed": ("Schreiben fehlgeschlagen", "Échec de l'écriture"),
+        "Image can't be read": ("Bild kann nicht gelesen werden", "Impossible de lire l’image"),
+        "Can't write to destination": ("Ziel kann nicht beschrieben werden", "Impossible d’écrire à la destination"),
+        "Writing failed": ("Schreiben fehlgeschlagen", "Échec de l’écriture"),
         "Invalid size": ("Ungültige Grösse", "Taille non valide"),
         "Already %d×%d, left as is": ("Bereits %d×%d, unverändert", "Déjà %d×%d, laissé tel quel"),
         "Not enough memory": ("Nicht genug Speicher", "Mémoire insuffisante"),
         "Rotating failed": ("Drehen fehlgeschlagen", "Échec de la rotation"),
         "macOS can't save this format, convert it first":
             ("macOS kann dieses Format nicht sichern, zuerst konvertieren",
-             "macOS ne peut pas enregistrer ce format, convertissez-le d'abord"),
+             "macOS ne peut pas enregistrer ce format, convertissez-le d’abord"),
         "No location stored": ("Kein Ort gespeichert", "Aucun lieu enregistré"),
         "PDF can't be read": ("PDF kann nicht gelesen werden", "Impossible de lire le PDF"),
         "PDF is password protected": ("PDF ist passwortgeschützt", "Le PDF est protégé par un mot de passe"),
-        "Page %d can't be rendered": ("Seite %d kann nicht dargestellt werden", "Impossible d'afficher la page %d"),
+        "Page %d can't be rendered": ("Seite %d kann nicht dargestellt werden", "Impossible d’afficher la page %d"),
         "Compression filter unavailable": ("Komprimierungsfilter nicht verfügbar", "Filtre de compression indisponible"),
         "Page order doesn't match the PDF":
-            ("Seitenreihenfolge passt nicht zum PDF", "L'ordre des pages ne correspond pas au PDF"),
+            ("Seitenreihenfolge passt nicht zum PDF", "L’ordre des pages ne correspond pas au PDF"),
         "%@ can't be read": ("%@ kann nicht gelesen werden", "Impossible de lire %@"),
         "PDF can't be created": ("PDF kann nicht erstellt werden", "Impossible de créer le PDF"),
 
@@ -209,16 +240,16 @@ enum L10n {
             ("Kleine Dateien, ideal für Apple-Geräte", "Fichiers légers, idéal sur les appareils Apple"),
         "Smallest files, for the web": ("Kleinste Dateien, fürs Web", "Fichiers les plus légers, pour le web"),
         "Lossless, for print and archiving":
-            ("Verlustfrei, für Druck und Archiv", "Sans perte, pour l'impression et l'archivage"),
+            ("Verlustfrei, für Druck und Archiv", "Sans perte, pour l’impression et l’archivage"),
         "High quality": ("Hohe Qualität", "Haute qualité"),
         "Balanced": ("Ausgewogen", "Équilibré"),
         "Smallest": ("Am kleinsten", "Le plus léger"),
         "Barely visible difference, good for printing":
-            ("Kaum sichtbarer Unterschied, gut zum Drucken", "Différence à peine visible, idéal pour l'impression"),
+            ("Kaum sichtbarer Unterschied, gut zum Drucken", "Différence à peine visible, idéal pour l’impression"),
         "Looks the same on screen, much smaller":
-            ("Am Bildschirm gleich, viel kleiner", "Identique à l'écran, beaucoup plus léger"),
+            ("Am Bildschirm gleich, viel kleiner", "Identique à l’écran, beaucoup plus léger"),
         "For email and web, still sharp on screen":
-            ("Für E-Mail und Web, am Bildschirm noch scharf", "Pour l'e-mail et le web, toujours net à l'écran"),
+            ("Für E-Mail und Web, am Bildschirm noch scharf", "Pour l’e-mail et le web, toujours net à l’écran"),
         "Quality level": ("Qualitätsstufe", "Niveau de qualité"),
         "Target size": ("Zielgrösse", "Taille cible"),
         "Longest side": ("Längste Seite", "Côté le plus long"),
@@ -227,13 +258,13 @@ enum L10n {
         "Percentage": ("Prozent", "Pourcentage"),
         "Everything": ("Alles", "Tout"),
         "Location only": ("Nur Ort", "Lieu uniquement"),
-        "Same as image": ("Wie Bild", "Comme l'image"),
+        "Same as image": ("Wie Bild", "Comme l’image"),
         "Each page separately": ("Jede Seite einzeln", "Chaque page séparément"),
         "Every few pages": ("Alle paar Seiten", "Par groupes de pages"),
 
         // Tool view
-        "Save to:": ("Sichern in:", "Enregistrer dans :"),
-        "same folder as original": ("gleicher Ordner wie Original", "même dossier que l'original"),
+        "Save to:": ("Sichern in:", "Enregistrer dans :"),
+        "same folder as original": ("gleicher Ordner wie Original", "même dossier que l’original"),
         "Reset": ("Zurücksetzen", "Réinitialiser"),
         "Choose Folder…": ("Ordner wählen…", "Choisir un dossier…"),
         "Choose Files…": ("Dateien wählen…", "Choisir des fichiers…"),
@@ -251,7 +282,7 @@ enum L10n {
         "MB": ("MB", "Mo"),
         "Tries gentle settings first and only goes further when needed":
             ("Versucht zuerst schonende Einstellungen und geht nur wenn nötig weiter",
-             "Essaie d'abord des réglages doux et ne va plus loin que si nécessaire"),
+             "Essaie d’abord des réglages doux et ne va plus loin que si nécessaire"),
         "pixels": ("Pixel", "pixels"),
         "Only makes photos smaller. Format and photo info are kept.":
             ("Macht Fotos nur kleiner. Format und Fotoinfos bleiben erhalten.",
@@ -260,35 +291,31 @@ enum L10n {
         "90° left": ("90° links", "90° à gauche"),
         "For PDFs, only the selected pages are turned (all if none selected)":
             ("Bei PDFs werden nur die ausgewählten Seiten gedreht (alle, wenn keine ausgewählt)",
-             "Pour les PDF, seules les pages choisies sont pivotées (toutes si aucune n'est choisie)"),
+             "Pour les PDF, seules les pages choisies sont pivotées (toutes si aucune n’est choisie)"),
         "Removes camera, date and location. The image itself stays exactly the same.":
             ("Entfernt Kamera, Datum und Ort. Das Bild selbst bleibt genau gleich.",
-             "Supprime l'appareil, la date et le lieu. L'image elle-même reste identique."),
+             "Supprime l’appareil, la date et le lieu. L’image elle-même reste identique."),
         "Removes only where the photo was taken. The image itself stays exactly the same.":
             ("Entfernt nur, wo das Foto aufgenommen wurde. Das Bild selbst bleibt genau gleich.",
-             "Supprime uniquement le lieu de la prise de vue. L'image elle-même reste identique."),
+             "Supprime uniquement le lieu de la prise de vue. L’image elle-même reste identique."),
         "For PDFs, removes author, title and other document info.":
             ("Bei PDFs werden Autor, Titel und weitere Dokumentinfos entfernt.",
-             "Pour les PDF, supprime l'auteur, le titre et les autres infos du document."),
+             "Pour les PDF, supprime l’auteur, le titre et les autres infos du document."),
         "New name": ("Neuer Name", "Nouveau nom"),
-        "starting at %d": ("beginnend bei %d", "à partir de %d"),
         "Undo Rename": ("Umbenennen widerrufen", "Annuler le renommage"),
-        "# is replaced by the number (### → 001). Files are renamed in place, in list order. Drag to reorder or use Sort.":
-            ("# wird durch die Nummer ersetzt (### → 001). Die Dateien werden direkt umbenannt, in der Reihenfolge der Liste. Zum Umordnen ziehen oder «Sortieren» verwenden.",
-             "# est remplacé par le numéro (### → 001). Les fichiers sont renommés sur place, dans l'ordre de la liste. Glissez pour réordonner ou utilisez Trier."),
         "Name": ("Name", "Nom"),
         "Photo pages": ("Fotoseiten", "Pages photo"),
         "Margin": ("Rand", "Marge"),
         "Files are added in list order. Drag to reorder or use Sort. PDF pages are added unchanged.":
             ("Die Dateien werden in der Reihenfolge der Liste hinzugefügt. Zum Umordnen ziehen oder «Sortieren» verwenden. PDF-Seiten werden unverändert übernommen.",
-             "Les fichiers sont ajoutés dans l'ordre de la liste. Glissez pour réordonner ou utilisez Trier. Les pages PDF sont ajoutées telles quelles."),
+             "Les fichiers sont ajoutés dans l’ordre de la liste. Glissez pour réordonner ou utilisez Trier. Les pages PDF sont ajoutées telles quelles."),
         "%d pages each": ("je %d Seiten", "%d pages chacun"),
         "Add…": ("Hinzufügen…", "Ajouter…"),
         "Clear List": ("Liste leeren", "Vider la liste"),
         "Sort": ("Sortieren", "Trier"),
         "By Name": ("Nach Name", "Par nom"),
         "By Date Taken": ("Nach Aufnahmedatum", "Par date de prise de vue"),
-        "Reverse Order": ("Reihenfolge umkehren", "Inverser l'ordre"),
+        "Reverse Order": ("Reihenfolge umkehren", "Inverser l’ordre"),
         "Show in Finder": ("Im Finder zeigen", "Afficher dans le Finder"),
 
         // Sheets
@@ -304,6 +331,7 @@ enum L10n {
         "Add": ("Hinzufügen", "Ajouter"),
         "All Remaining": ("Alle übrigen", "Toutes les restantes"),
         "Clear All": ("Alles zurücksetzen", "Tout effacer"),
+        "Remove PDF %d": ("PDF %d entfernen", "Supprimer le PDF %d"),
         "Remove this PDF": ("Dieses PDF entfernen", "Supprimer ce PDF"),
         "Original · %@": ("Original · %@", "Original · %@"),
         "Compressed · %@": ("Komprimiert · %@", "Compressé · %@"),
@@ -315,29 +343,29 @@ enum L10n {
         "Keep": ("Behalten", "Conserver"),
         // Page overview
         "Selected pages": ("Ausgewählte Seiten", "Pages choisies"),
-        "No pages selected yet": ("Noch keine Seiten ausgewählt", "Aucune page choisie pour l'instant"),
+        "No pages selected yet": ("Noch keine Seiten ausgewählt", "Aucune page choisie pour l’instant"),
         "No pages selected yet: click pages in the overview first":
             ("Noch keine Seiten ausgewählt: zuerst in der Übersicht Seiten anklicken",
-             "Aucune page choisie : cliquez d'abord sur des pages dans l'aperçu"),
+             "Aucune page choisie : cliquez d’abord sur des pages dans l’aperçu"),
         "No pages selected = all pages are used":
             ("Keine Seiten ausgewählt = alle Seiten werden verwendet",
              "Aucune page choisie = toutes les pages sont utilisées"),
         "%d of %d pages selected": ("%d von %d Seiten ausgewählt", "%1$d pages choisies sur %2$d"),
         "Click pages to add them to the new PDF, shift-click for a range. Use New PDF to make several PDFs at once, each in its own colour.":
             ("Seiten anklicken, um sie zum neuen PDF hinzuzufügen, Shift-Klick für einen Bereich. Mit «Neues PDF» lassen sich mehrere PDFs auf einmal erstellen, jedes in eigener Farbe.",
-             "Cliquez sur les pages pour les ajouter au nouveau PDF, Maj-clic pour une plage. « Nouveau PDF » permet d'en créer plusieurs d'un coup, chacun dans sa couleur."),
+             "Cliquez sur les pages pour les ajouter au nouveau PDF, Maj-clic pour une plage. « Nouveau PDF » permet d’en créer plusieurs d’un coup, chacun dans sa couleur."),
         "Makes a new PDF from the pages you click above. Add more PDFs to split into several at once.":
             ("Erstellt ein neues PDF aus den Seiten, die oben angeklickt sind. Mit weiteren PDFs lässt sich in einem Schritt in mehrere aufteilen.",
-             "Crée un nouveau PDF à partir des pages cliquées ci-dessus. Ajoutez d'autres PDF pour en créer plusieurs d'un coup."),
+             "Crée un nouveau PDF à partir des pages cliquées ci-dessus. Ajoutez d’autres PDF pour en créer plusieurs d’un coup."),
         "Makes one PDF per page. The page selection above limits which pages (all if none selected).":
             ("Erstellt ein PDF pro Seite. Die Seitenauswahl oben schränkt die Seiten ein (alle, wenn keine ausgewählt).",
-             "Crée un PDF par page. La sélection ci-dessus limite les pages concernées (toutes si aucune n'est choisie)."),
+             "Crée un PDF par page. La sélection ci-dessus limite les pages concernées (toutes si aucune n’est choisie)."),
         "Cuts the PDF into parts of %d pages. The page selection above limits which pages (all if none selected).":
             ("Teilt das PDF in Teile zu je %d Seiten. Die Seitenauswahl oben schränkt die Seiten ein (alle, wenn keine ausgewählt).",
-             "Découpe le PDF en parties de %d pages. La sélection ci-dessus limite les pages concernées (toutes si aucune n'est choisie)."),
+             "Découpe le PDF en parties de %d pages. La sélection ci-dessus limite les pages concernées (toutes si aucune n’est choisie)."),
         "Drag the pages above into the order you want. Click another PDF in the list to arrange its pages. The PDF is saved as a new file.":
             ("Die Seiten oben in die gewünschte Reihenfolge ziehen. Ein anderes PDF in der Liste anklicken, um dessen Seiten anzuordnen. Das PDF wird als neue Datei gesichert.",
-             "Glissez les pages ci-dessus dans l'ordre voulu. Cliquez sur un autre PDF de la liste pour arranger ses pages. Le PDF est enregistré dans un nouveau fichier."),
+             "Glissez les pages ci-dessus dans l’ordre voulu. Cliquez sur un autre PDF de la liste pour arranger ses pages. Le PDF est enregistré dans un nouveau fichier."),
         "Drag pages to move them. Right-click a page to move it to the beginning or end.":
             ("Seiten ziehen, um sie zu verschieben. Rechtsklick auf eine Seite, um sie an den Anfang oder ans Ende zu setzen.",
              "Glissez les pages pour les déplacer. Clic droit sur une page pour la placer au début ou à la fin."),
@@ -348,6 +376,47 @@ enum L10n {
         "Move to Beginning": ("An den Anfang", "Placer au début"),
         "Move to End": ("Ans Ende", "Placer à la fin"),
         "was %d": ("vorher %d", "avant %d"),
+        // Window, toolbar, menus
+        "1 file": ("1 Datei", "1 fichier"),
+        "%d files": ("%d Dateien", "%d fichiers"),
+        "Add Files": ("Dateien hinzufügen", "Ajouter des fichiers"),
+        "Add Files…": ("Dateien hinzufügen…", "Ajouter des fichiers…"),
+        "Add photos, PDFs or folders (⌘O)": ("Fotos, PDFs oder Ordner hinzufügen (⌘O)", "Ajouter des photos, des PDF ou des dossiers (⌘O)"),
+        "Choose Output Folder…": ("Zielordner wählen…", "Choisir le dossier de destination…"),
+        "Sort the list": ("Liste sortieren", "Trier la liste"),
+        "Remove all files from the list. The files themselves are not touched.":
+            ("Alle Dateien aus der Liste entfernen. Die Dateien selbst bleiben unverändert.",
+             "Retirer tous les fichiers de la liste. Les fichiers eux-mêmes ne sont pas modifiés."),
+        "Remove from List": ("Aus Liste entfernen", "Retirer de la liste"),
+        "Remove from list": ("Aus Liste entfernen", "Retirer de la liste"),
+        "Show the new files in Finder (⇧⌘R)": ("Neue Dateien im Finder zeigen (⇧⌘R)", "Afficher les nouveaux fichiers dans le Finder (⇧⌘R)"),
+        "Save to": ("Sichern in", "Enregistrer dans"),
+        "Same folder as original": ("Gleicher Ordner wie das Original", "Même dossier que l’original"),
+        "Use Original Folder": ("Originalordner verwenden", "Utiliser le dossier d’origine"),
+        "Tool": ("Werkzeug", "Outil"),
+        "Start": ("Starten", "Lancer"),
+        "Extract": ("Extrahieren", "Extraire"),
+        "Extract Images": ("Bilder extrahieren", "Extraire les images"),
+        "Save the pictures inside a PDF as separate image files":
+            ("Bilder aus einem PDF als einzelne Bilddateien sichern", "Enregistrer les images d’un PDF comme fichiers séparés"),
+        "Compress by": ("Komprimieren nach", "Compresser selon"),
+        "Level": ("Stufe", "Niveau"),
+        "Maximum size in MB": ("Maximale Grösse in MB", "Taille maximale en Mo"),
+        "Resize by": ("Grösse nach", "Redimensionner selon"),
+        "Size": ("Grösse", "Taille"),
+        "Rotation": ("Drehung", "Rotation"),
+        "Remove": ("Entfernen", "Supprimer"),
+        "Split mode": ("Teilen nach", "Mode de division"),
+        "Page %d": ("Seite %d", "Page %d"),
+        "Skip small images (icons, lines, logos under %d px)":
+            ("Kleine Bilder überspringen (Symbole, Linien, Logos unter %d px)",
+             "Ignorer les petites images (icônes, lignes, logos de moins de %d px)"),
+        "Pictures are saved at their original resolution into a new folder. JPEGs are copied unchanged, others are saved as PNG.":
+            ("Die Bilder werden in Originalauflösung in einen neuen Ordner gesichert. JPEGs werden unverändert kopiert, alle anderen als PNG gesichert.",
+             "Les images sont enregistrées dans leur résolution d’origine dans un nouveau dossier. Les JPEG sont copiés tels quels, les autres enregistrés en PNG."),
+        "Menus that come from macOS switch language after the app is restarted.":
+            ("Menüs, die von macOS stammen, wechseln die Sprache nach einem Neustart der App.",
+             "Les menus fournis par macOS changent de langue après le redémarrage de l’app."),
     ]
 }
 

@@ -20,11 +20,11 @@ struct PageArranger: View {
             HStack {
                 Text(url.lastPathComponent).font(.headline).lineLimit(1)
                 Spacer()
-                Text(changed ? "Order changed" : "Original order").foregroundStyle(.secondary)
+                Text(tr(changed ? "Order changed" : "Original order")).foregroundStyle(.secondary)
             }
             HStack {
-                Button("Reverse") { withAnimation { order.reverse() } }
-                Button("Reset") { withAnimation { order = Array(0..<pageCount) } }.disabled(!changed)
+                Button(tr("Reverse")) { withAnimation { order.reverse() } }
+                Button(tr("Reset")) { withAnimation { order = Array(0..<pageCount) } }.disabled(!changed)
                 Spacer()
             }
             ScrollView {
@@ -37,8 +37,8 @@ struct PageArranger: View {
                             }
                             .onDrop(of: [.text], delegate: MoveDrop(target: page, order: $order, dragging: $dragging))
                             .contextMenu {
-                                Button("Move to Beginning") { move(page, to: 0) }.disabled(pos == 0)
-                                Button("Move to End") { move(page, to: order.count) }.disabled(pos == order.count - 1)
+                                Button(tr("Move to Beginning")) { move(page, to: 0) }.disabled(pos == 0)
+                                Button(tr("Move to End")) { move(page, to: order.count) }.disabled(pos == order.count - 1)
                             }
                     }
                 }
@@ -46,7 +46,7 @@ struct PageArranger: View {
             }
             // Dropping between tiles or on empty space ends the drag cleanly
             .onDrop(of: [.text], isTargeted: nil) { _ in dragging = nil; return true }
-            Text("Drag pages to move them. Right-click a page to move it to the beginning or end.")
+            Text(tr("Drag pages to move them. Right-click a page to move it to the beginning or end."))
                 .font(.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -65,7 +65,7 @@ struct PageArranger: View {
             HStack(spacing: 4) {
                 Text("\(pos + 1)").font(.caption.bold())
                 if page != pos {
-                    Text("was \(page + 1)").font(.caption).foregroundStyle(Color.accentColor)
+                    Text(tr("was %d", page + 1)).font(.caption).foregroundStyle(Color.accentColor)
                 }
             }
         }

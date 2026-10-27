@@ -29,8 +29,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>NSHighResolutionCapable</key><true/>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleIconName</key><string>AppIcon</string>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
+<key>CFBundleLocalizations</key><array><string>en</string><string>de</string><string>fr</string></array>
 <key>NSAppleEventsUsageDescription</key><string>File Tools asks Microsoft Word to save your Word documents as PDF.</string>
 </dict></plist>
 PLIST
+# The app's own texts are translated in L10n.swift; these folders only tell macOS which languages
+# exist, so its own menus (Edit, Window, …) and the permission prompt follow the chosen language
+mkdir -p "$APP/Contents/Resources/"{en,de,fr}.lproj
+echo '"NSAppleEventsUsageDescription" = "File Tools bittet Microsoft Word, Ihre Word-Dokumente als PDF zu sichern.";' \
+    > "$APP/Contents/Resources/de.lproj/InfoPlist.strings"
+echo '"NSAppleEventsUsageDescription" = "File Tools demande à Microsoft Word d’enregistrer vos documents Word en PDF.";' \
+    > "$APP/Contents/Resources/fr.lproj/InfoPlist.strings"
 codesign --force --sign - "$APP"
 echo built
