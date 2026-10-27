@@ -386,6 +386,7 @@ final class Model: ObservableObject {
                 }
                 let out = uniqueURL(folder ?? job.url.deletingLastPathComponent(), job.outName ?? job.url.deletingPathExtension().lastPathComponent, "pdf")
                 do { try FileManager.default.moveItem(at: tmp, to: out) } catch { throw ConvError(tr("Can't write to destination")) }
+                showExtension(out)
                 let pages = PDFDocument(url: out)?.pageCount ?? 0
                 return Outcome(message: [out.lastPathComponent, pages == 1 ? tr("1 page") : tr("%d pages", pages), fmtSize(fileSize(out))]
                     .joined(separator: " · "), files: [out])
@@ -503,6 +504,7 @@ final class Model: ObservableObject {
                     _ = try Compressor.shrinkPDF(tmp, level: level)
                 }
                 do { try fm.moveItem(at: tmp, to: out) } catch { throw ConvError(tr("Can't write to destination")) }
+                showExtension(out)
                 return pages
             }
             let result: Result<Int, Error>

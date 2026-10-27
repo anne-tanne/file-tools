@@ -155,6 +155,14 @@ func outputURL(for src: URL, suffix: String?, ext: String? = nil, folder: URL?) 
     return uniqueURL(folder ?? src.deletingLastPathComponent(), base, ext ?? src.pathExtension)
 }
 
+/// Makes Finder show the extension (Word can save its PDFs with "Hide extension" set)
+func showExtension(_ u: URL) {
+    var u = u
+    var values = URLResourceValues()
+    values.hasHiddenExtension = false
+    try? u.setResourceValues(values)
+}
+
 func fileSize(_ u: URL) -> Int64 {
     ((try? FileManager.default.attributesOfItem(atPath: u.path)[.size]) as? NSNumber)?.int64Value ?? 0
 }
