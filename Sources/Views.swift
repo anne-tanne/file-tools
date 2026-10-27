@@ -101,14 +101,6 @@ struct ToolView: View {
                 .help(tr("Remove all files from the list. The files themselves are not touched."))
                 .disabled(m.busy || m.items.isEmpty)
         }
-        ToolbarItem(placement: .primaryAction) {
-            Button { m.showInFinder() } label: { Label(tr("Show in Finder"), systemImage: "finder") }
-                .help(tr("Show the new files in Finder (⇧⌘R)"))
-                .disabled(m.busy || m.lastOutputs.isEmpty)
-            ShareLink(items: m.lastOutputs) { Label(tr("Share"), systemImage: "square.and.arrow.up") }
-                .help(tr("Send the new files by Mail, Messages, AirDrop and more"))
-                .disabled(m.busy || m.lastOutputs.isEmpty)
-        }
     }
 
     // MARK: File list
@@ -193,7 +185,14 @@ struct ToolView: View {
         .opacity(usable ? 1 : 0.45)
         .accessibilityElement(children: .contain)
         .contextMenu {
-            Button(tr("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([it.url]) }
+            if usable && !it.outputs.isEmpty {
+                Button(tr(it.outputs.count == 1 ? "Show New File in Finder" : "Show New Files in Finder")) {
+                    NSWorkspace.shared.activateFileViewerSelecting(it.outputs)
+                }
+                Button(tr("Show Original in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([it.url]) }
+            } else {
+                Button(tr("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([it.url]) }
+            }
             Divider()
             Button(tr("Remove from List")) { m.remove(it.id, undo: undo) }.disabled(m.busy)
         }
@@ -422,6 +421,10 @@ struct ToolView: View {
                     .lineLimit(2)
             } else if !m.items.isEmpty {
                 Text(m.items.count == 1 ? tr("1 file") : tr("%d files", m.items.count)).foregroundStyle(.secondary)
+            }
+            if !m.busy && !m.lastOutputs.isEmpty {   // only once there is something to show
+                Button(tr("Show in Finder")) { m.showInFinder() }
+                    .help(tr("Show the new files in Finder (⇧⌘R)"))
             }
             Spacer()
             if m.busy {

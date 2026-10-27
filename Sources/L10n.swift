@@ -303,6 +303,9 @@ enum L10n {
         "By Date Taken": ("Nach Aufnahmedatum", "Par date de prise de vue"),
         "Reverse Order": ("Reihenfolge umkehren", "Inverser l’ordre"),
         "Show in Finder": ("Im Finder zeigen", "Afficher dans le Finder"),
+        "Show New File in Finder": ("Neue Datei im Finder zeigen", "Afficher le nouveau fichier dans le Finder"),
+        "Show New Files in Finder": ("Neue Dateien im Finder zeigen", "Afficher les nouveaux fichiers dans le Finder"),
+        "Show Original in Finder": ("Original im Finder zeigen", "Afficher l’original dans le Finder"),
 
         // Sheets
         "%d of %d selected": ("%d von %d ausgewählt", "%1$d sur %2$d sélectionnées"),
@@ -406,9 +409,6 @@ enum L10n {
         // List undo, sharing, dragging out, stopping
         "Move": ("Verschieben", "Déplacer"),
         "Share": ("Teilen", "Partager"),
-        "Send the new files by Mail, Messages, AirDrop and more":
-            ("Die neuen Dateien per Mail, Nachrichten, AirDrop und mehr senden",
-             "Envoyer les nouveaux fichiers par Mail, Messages, AirDrop, etc."),
         "Drag to put “%@” somewhere else": ("Ziehen, um «%@» woanders abzulegen", "Faire glisser pour déposer « %@ » ailleurs"),
         "Stop": ("Stoppen", "Arrêter"),
         "Stopping…": ("Wird gestoppt…", "Arrêt…"),
