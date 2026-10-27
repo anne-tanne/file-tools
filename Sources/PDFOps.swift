@@ -173,6 +173,29 @@ enum PDFOps {
 
     // MARK: Combine
 
+    /// Joins PDFs into one, with a bookmark per file that points to its first page
+    static func merge(_ files: [(url: URL, title: String)], to out: URL) throws -> Int {
+        let result = PDFDocument()
+        let outline = PDFOutline()
+        for f in files {
+            let doc = try open(f.url)
+            let first = result.pageCount
+            for i in 0..<doc.pageCount {
+                if let p = doc.page(at: i)?.copy() as? PDFPage { result.insert(p, at: result.pageCount) }
+            }
+            if let start = result.page(at: first) {
+                let mark = PDFOutline()
+                mark.label = f.title
+                mark.destination = PDFDestination(page: start, at: CGPoint(x: 0, y: start.bounds(for: .mediaBox).maxY))
+                outline.insertChild(mark, at: outline.numberOfChildren)
+            }
+        }
+        guard result.pageCount > 0 else { throw ConvError(tr("Nothing to combine")) }
+        result.outlineRoot = outline
+        try save(result, to: out)
+        return result.pageCount
+    }
+
     static func combine(_ entries: [(url: URL, kind: Kind)], pageSize: PageSize, margin: Bool, to out: URL,
                         progress: (Int) -> Void) throws -> Int {
         let result = PDFDocument()

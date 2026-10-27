@@ -153,6 +153,19 @@ enum L10n {
         "Word: ": ("Word: ", "Word : "),
         "Not converted: Word wasn't responding":
             ("Nicht konvertiert: Word hat nicht reagiert", "Non converti : Word ne répondait pas"),
+        "Combine into one PDF": ("Zu einem PDF zusammenfügen", "Réunir en un seul PDF"),
+        "Without tracked changes and comments": ("Ohne Änderungen und Kommentare", "Sans modifications suivies ni commentaires"),
+        "Accepts all tracked changes and removes comments in the copy Word works on. The Word document itself stays unchanged.":
+            ("Nimmt alle nachverfolgten Änderungen an und entfernt Kommentare in der Kopie, mit der Word arbeitet. Das Word-Dokument selbst bleibt unverändert.",
+             "Accepte toutes les modifications suivies et supprime les commentaires dans la copie utilisée par Word. Le document Word lui-même reste inchangé."),
+        "Update fields and table of contents": ("Felder und Inhaltsverzeichnis aktualisieren", "Mettre à jour les champs et la table des matières"),
+        "Updates page numbers, cross-references and tables of contents before the PDF is made, as Word does before printing.":
+            ("Aktualisiert Seitenzahlen, Querverweise und Inhaltsverzeichnisse, bevor das PDF entsteht, wie Word es vor dem Drucken tut.",
+             "Met à jour les numéros de page, les renvois et les tables des matières avant de créer le PDF, comme Word le fait avant l’impression."),
+        "Documents are added in list order, each with a bookmark. Drag to reorder or use Sort.":
+            ("Die Dokumente werden in der Reihenfolge der Liste angefügt, jedes mit einem Lesezeichen. Zum Umordnen ziehen oder «Sortieren» verwenden.",
+             "Les documents sont ajoutés dans l’ordre de la liste, chacun avec un signet. Glissez pour réordonner ou utilisez Trier."),
+        "Compressing…": ("Wird komprimiert…", "Compression…"),
 
         // Engine messages
         "Already under %@": ("Bereits unter %@", "Déjà sous %@"),

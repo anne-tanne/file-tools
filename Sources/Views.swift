@@ -39,7 +39,7 @@ struct ToolView: View {
     @State private var targeted = false
 
     var body: some View {
-        let preview = m.tool == .rename ? m.renamePreview() : m.tool == .wordToPDF ? m.wordNames().mapValues { $0 + ".pdf" } : [:]
+        let preview = m.tool == .rename ? m.renamePreview() : m.tool == .wordToPDF && !m.wordCombine ? m.wordNames().mapValues { $0 + ".pdf" } : [:]
         VStack(alignment: .leading, spacing: 14) {
             if let it = m.pageItem {
                 // List shrinks to what it needs, the page overview gets the free space
@@ -352,6 +352,32 @@ struct ToolView: View {
             Text("Drag the pages above into the order you want. Click another PDF in the list to arrange its pages. The PDF is saved as a new file.")
                 .font(.caption).foregroundStyle(.secondary)
         case .wordToPDF:
+            HStack(spacing: 14) {
+                Toggle("Combine into one PDF", isOn: $m.wordCombine)
+                Toggle("Compress", isOn: $m.wordCompress)
+                if m.wordCompress {
+                    Picker("Level", selection: $m.wordLevel) {
+                        ForEach(Level.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden().fixedSize()
+                }
+                Spacer()
+            }
+            HStack(spacing: 14) {
+                Toggle("Without tracked changes and comments", isOn: $m.wordFinal)
+                    .help("Accepts all tracked changes and removes comments in the copy Word works on. The Word document itself stays unchanged.")
+                Toggle("Update fields and table of contents", isOn: $m.wordUpdateFields)
+                    .help("Updates page numbers, cross-references and tables of contents before the PDF is made, as Word does before printing.")
+                Spacer()
+            }
+            if m.wordCombine {
+                HStack(spacing: 10) {
+                    Text("Name")
+                    TextField("Name", text: $m.wordCombinedName, prompt: Text("Combined")).labelsHidden().frame(width: 180)
+                    Text(".pdf").foregroundStyle(.secondary)
+                    Spacer()
+                }
+            } else {
             HStack(spacing: 10) {
                 Picker("PDF names", selection: $m.wordNaming) {
                     ForEach(WordNaming.allCases) { Text($0.rawValue).tag($0) }
@@ -370,6 +396,7 @@ struct ToolView: View {
                 }
                 Spacer()
             }
+            }
             Text(wordHint).font(.caption).foregroundStyle(.secondary)
         case .extractImages:
             Toggle("Skip small images (icons, lines, logos under \(PDFImages.minSide) px)", isOn: $m.skipSmallImages)
@@ -379,7 +406,9 @@ struct ToolView: View {
     }
 
     var wordHint: String {
-        m.wordNaming == .numbered
+        m.wordCombine
+            ? "Documents are added in list order, each with a bookmark. Drag to reorder or use Sort."
+            : m.wordNaming == .numbered
             ? "# is replaced by the number (### → 001), in list order. Drag to reorder or use Sort."
             : "Microsoft Word makes the PDFs, so they look exactly like the document in Word. Documents you have open in Word stay open."
     }
@@ -418,6 +447,7 @@ struct ToolView: View {
     var actionTitle: String {
         switch m.tool {
         case .combine: return "Create PDF"
+        case .wordToPDF where m.wordCombine: return m.pending.isEmpty && !m.eligible.isEmpty ? "Create PDF Again" : "Create PDF"
         case .rename: return "Rename (\(m.renameCount))"
         default:
             let n = m.pending.count

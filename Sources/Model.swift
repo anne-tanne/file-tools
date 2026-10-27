@@ -178,6 +178,12 @@ final class Model: ObservableObject {
     @Published var wordSuffix = ""
     @Published var wordPattern = tr("Document ###")
     @Published var wordStart = 1
+    @Published var wordFinal = true
+    @Published var wordUpdateFields = true
+    @Published var wordCombine = false
+    @Published var wordCombinedName = tr("Combined")
+    @Published var wordCompress = false
+    @Published var wordLevel: Level = .balanced
     // Rename
     @Published var renamePattern = tr("Photo ###")
     @Published var renameStart = 1
@@ -360,12 +366,24 @@ final class Model: ObservableObject {
                 return
             }
             let wasRunning = WordOps.isRunning
+            let options = WordOps.Options(final: wordFinal, updateFields: wordUpdateFields)
+            let level: Level? = wordCompress ? wordLevel : nil
             WordOps.stuck = false
+            if wordCombine { combineWord(options, level: level, wasRunning: wasRunning); return }
             runEach({ job, progress in
                 progress(tr("Word is creating the PDF…"))
-                let out = try WordOps.toPDF(job.url, name: job.outName ?? job.url.deletingPathExtension().lastPathComponent, folder: folder)
+                let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("pdf")
+                defer { try? FileManager.default.removeItem(at: tmp) }
+                try WordOps.toPDF(job.url, options: options, to: tmp)
+                if let level {
+                    progress(tr("Compressing…"))
+                    _ = try Compressor.shrinkPDF(tmp, level: level)
+                }
+                let out = uniqueURL(folder ?? job.url.deletingLastPathComponent(), job.outName ?? job.url.deletingPathExtension().lastPathComponent, "pdf")
+                do { try FileManager.default.moveItem(at: tmp, to: out) } catch { throw ConvError(tr("Can't write to destination")) }
                 let pages = PDFDocument(url: out)?.pageCount ?? 0
-                return Outcome(message: out.lastPathComponent + " · " + (pages == 1 ? tr("1 page") : tr("%d pages", pages)), files: [out])
+                return Outcome(message: [out.lastPathComponent, pages == 1 ? tr("1 page") : tr("%d pages", pages), fmtSize(fileSize(out))]
+                    .joined(separator: " · "), files: [out])
             }, finally: { if !wasRunning { WordOps.quitIfIdle() } })
         case .combine: combine()
         case .rename: rename()
@@ -444,6 +462,61 @@ final class Model: ObservableObject {
     }
 
     // MARK: Word to PDF
+
+    /// All Word documents into one PDF, in list order, with a bookmark per document
+    private func combineWord(_ options: WordOps.Options, level: Level?, wasRunning: Bool) {
+        let docs = eligible
+        guard !docs.isEmpty else { return }
+        let name = wordCombinedName.trimmingCharacters(in: .whitespaces).isEmpty ? tr("Combined") : wordCombinedName
+        let out = uniqueURL(outputFolder ?? docs[0].url.deletingLastPathComponent(), name, "pdf")
+        let jobs = docs.map { (id: $0.id, url: $0.url) }
+        for d in docs { update(d.id) { $0.status = tr("Waiting…"); $0.done = false; $0.failed = false } }
+        busy = true
+        Task.detached {
+            let fm = FileManager.default
+            let work = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            defer { try? fm.removeItem(at: work) }
+            func build() async throws -> Int {
+                try fm.createDirectory(at: work, withIntermediateDirectories: true)
+                var parts: [(url: URL, title: String)] = []
+                for (n, j) in jobs.enumerated() {
+                    await MainActor.run { self.update(j.id) { $0.status = tr("Word is creating the PDF…") } }
+                    let part = work.appendingPathComponent("\(n).pdf")
+                    do { try WordOps.toPDF(j.url, options: options, to: part) } catch {
+                        await MainActor.run { self.update(j.id) { $0.status = tr("Error: ") + error.localizedDescription; $0.failed = true } }
+                        // Say which file stopped the whole PDF
+                        throw ConvError("\(j.url.lastPathComponent): \(error.localizedDescription)")
+                    }
+                    let pages = PDFDocument(url: part)?.pageCount ?? 0
+                    await MainActor.run { self.update(j.id) { $0.status = "✓ " + (pages == 1 ? tr("1 page") : tr("%d pages", pages)) } }
+                    parts.append((part, j.url.deletingPathExtension().lastPathComponent))
+                }
+                let tmp = work.appendingPathComponent("combined.pdf")
+                let pages = try PDFOps.merge(parts, to: tmp)
+                if let level {
+                    await MainActor.run { self.summary = tr("Compressing…") }
+                    _ = try Compressor.shrinkPDF(tmp, level: level)
+                }
+                do { try fm.moveItem(at: tmp, to: out) } catch { throw ConvError(tr("Can't write to destination")) }
+                return pages
+            }
+            let result: Result<Int, Error>
+            do { result = .success(try await build()) } catch { result = .failure(error) }
+            if !wasRunning { WordOps.quitIfIdle() }
+            await MainActor.run {
+                switch result {
+                case .success(let pages):
+                    for d in docs { self.update(d.id) { $0.done = true } }
+                    self.summary = tr("Created “%@”: %d pages, %@", out.lastPathComponent, pages, fmtSize(fileSize(out)))
+                    self.lastOutputs = [out]
+                case .failure(let e):
+                    for d in docs { self.update(d.id) { if !$0.failed && !$0.status.hasPrefix("✓") { $0.status = tr("Ready") } } }
+                    self.summary = tr("Error: ") + e.localizedDescription; self.summaryFailed = true
+                }
+                self.busy = false
+            }
+        }
+    }
 
     /// PDF name (without .pdf) for every Word document, numbered in list order
     func wordNames() -> [Item.ID: String] {
