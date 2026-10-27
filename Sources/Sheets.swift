@@ -318,7 +318,7 @@ struct CompareView: View {
                 }
                 .pickerStyle(.segmented).fixedSize()
                 Spacer()
-                Button(tr("Delete Compressed Copy"), role: .destructive) { onDiscard(); dismiss() }
+                Button(tr("Move Compressed Copy to Trash"), role: .destructive) { onDiscard(); dismiss() }
                 Button(tr("Keep")) { dismiss() }.keyboardShortcut(.defaultAction)
             }
         }

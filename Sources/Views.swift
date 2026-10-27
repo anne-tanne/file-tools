@@ -9,9 +9,9 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: Binding(get: { Optional(m.tool) }, set: { if let t = $0 { m.tool = t } })) {
-                Section(tr("Convert & Compress")) { toolRows([.convert, .compress, .resize]) }
-                Section(tr("Edit")) { toolRows([.rotate, .strip, .rename]) }
-                Section(tr("PDF")) { toolRows([.wordToPDF, .combine, .split, .reorder, .extractImages]) }
+                ForEach(Tool.groups, id: \.title) { g in
+                    Section(tr(g.title)) { toolRows(g.tools) }
+                }
             }
             .disabled(m.busy)
             .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
@@ -25,9 +25,9 @@ struct ContentView: View {
         .frame(minWidth: 880, minHeight: 580)
         .sheet(item: Binding(get: { m.items.first { $0.id == m.comparing && $0.output != nil } }, set: { m.comparing = $0?.id })) { it in
             CompareView(original: it.url, compressed: it.output!, isPDF: it.kind == .pdf) {
-                try? FileManager.default.removeItem(at: it.output!)
+                try? FileManager.default.trashItem(at: it.output!, resultingItemURL: nil)
                 m.lastOutputs.removeAll { $0 == it.output }
-                m.update(it.id) { $0.output = nil; $0.done = false; $0.status = tr("Compressed copy deleted") }
+                m.update(it.id) { $0.output = nil; $0.outputs = []; $0.done = false; $0.status = tr("Compressed copy moved to Trash") }
             }
         }
     }
@@ -39,6 +39,7 @@ struct ContentView: View {
 
 struct ToolView: View {
     @EnvironmentObject var m: Model
+    @Environment(\.undoManager) private var undo
     @State private var targeted = false
 
     var body: some View {
@@ -87,22 +88,25 @@ struct ToolView: View {
                 .help(tr("Add photos, PDFs or folders (⌘O)"))
                 .disabled(m.busy)
             Menu {
-                Button(tr("By Name")) { m.sort(.name) }
-                Button(tr("By Date Taken")) { m.sort(.date) }
+                Button(tr("By Name")) { m.sort(.name, undo: undo) }
+                Button(tr("By Date Taken")) { m.sort(.date, undo: undo) }
                 Divider()
-                Button(tr("Reverse Order")) { m.items.reverse() }
+                Button(tr("Reverse Order")) { m.sort(.reverse, undo: undo) }
             } label: {
                 Label(tr("Sort"), systemImage: "arrow.up.arrow.down")
             }
             .help(tr("Sort the list"))
             .disabled(m.busy || m.items.count < 2)
-            Button { m.clearList() } label: { Label(tr("Clear List"), systemImage: "trash") }
+            Button { m.clearList(undo: undo) } label: { Label(tr("Clear List"), systemImage: "xmark.circle") }
                 .help(tr("Remove all files from the list. The files themselves are not touched."))
                 .disabled(m.busy || m.items.isEmpty)
         }
         ToolbarItem(placement: .primaryAction) {
             Button { m.showInFinder() } label: { Label(tr("Show in Finder"), systemImage: "finder") }
                 .help(tr("Show the new files in Finder (⇧⌘R)"))
+                .disabled(m.busy || m.lastOutputs.isEmpty)
+            ShareLink(items: m.lastOutputs) { Label(tr("Share"), systemImage: "square.and.arrow.up") }
+                .help(tr("Send the new files by Mail, Messages, AirDrop and more"))
                 .disabled(m.busy || m.lastOutputs.isEmpty)
         }
     }
@@ -125,8 +129,10 @@ struct ToolView: View {
                 shape.strokeBorder(targeted ? AnyShapeStyle(.tint) : AnyShapeStyle(.separator), lineWidth: targeted ? 2 : 1)
                 List(selection: Binding(get: { m.pageItem?.id ?? m.focused }, set: { m.focused = $0 })) {
                     ForEach(m.items) { it in row(it, preview: preview).tag(it.id) }
-                        .onMove { m.items.move(fromOffsets: $0, toOffset: $1) }
+                        .onMove { from, to in m.changeItems(tr("Move"), undo: undo) { $0.move(fromOffsets: from, toOffset: to) } }
                 }
+                .onDeleteCommand { if !m.busy, let id = m.pageItem?.id ?? m.focused { m.remove(id, undo: undo) } }
+                .animation(.default, value: m.items.map(\.id))
                 .scrollContentBackground(.hidden)
                 .padding(6)
             }
@@ -158,6 +164,7 @@ struct ToolView: View {
                 .foregroundStyle(it.done && usable ? .green : it.failed ? .red : .secondary)
                 .frame(width: 18)
                 .accessibilityHidden(true)
+                .modifier(DragOut(file: usable && it.outputs.count == 1 ? it.outputs[0] : nil))
             Text(it.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
             if usable && it.kind == .pdf && m.assignsParts {
                 HStack(spacing: 3) {
@@ -179,7 +186,7 @@ struct ToolView: View {
             if m.tool == .compress, it.output != nil {
                 Button(tr("Compare")) { m.comparing = it.id }.controlSize(.small)
             }
-            Button { m.remove(it.id) } label: { Label(tr("Remove from List"), systemImage: "xmark.circle.fill") }
+            Button { m.remove(it.id, undo: undo) } label: { Label(tr("Remove from List"), systemImage: "xmark.circle.fill") }
                 .labelStyle(.iconOnly).buttonStyle(.borderless).foregroundStyle(.secondary)
                 .help(tr("Remove from list")).disabled(m.busy)
         }
@@ -188,7 +195,7 @@ struct ToolView: View {
         .contextMenu {
             Button(tr("Show in Finder")) { NSWorkspace.shared.activateFileViewerSelecting([it.url]) }
             Divider()
-            Button(tr("Remove from List")) { m.remove(it.id) }.disabled(m.busy)
+            Button(tr("Remove from List")) { m.remove(it.id, undo: undo) }.disabled(m.busy)
         }
     }
 
@@ -313,7 +320,7 @@ struct ToolView: View {
                 Text(tr("For PDFs, removes author, title and other document info.")).font(.caption).foregroundStyle(.secondary)
             }
         case .rename:
-            NameRuleEditor(rule: $m.renameRule, modes: [.add, .replace, .numbered], example: m.items.first?.url, placeholder: tr("Photo ###")) {
+            NameRuleEditor(rule: $m.renameRule, modes: [.add, .numbered], example: m.items.first?.url, placeholder: tr("Photo ###")) {
                 if !m.lastRename.isEmpty {
                     Button(tr("Undo Rename")) { m.undoRename() }.disabled(m.busy)
                 }
@@ -417,13 +424,24 @@ struct ToolView: View {
                 Text(m.items.count == 1 ? tr("1 file") : tr("%d files", m.items.count)).foregroundStyle(.secondary)
             }
             Spacer()
-            if m.busy { ProgressView().controlSize(.small) }
+            if m.busy {
+                ProgressView().controlSize(.small)
+                if m.canStop || m.stopping {
+                    Button(m.stopping ? tr("Stopping…") : tr("Stop")) { m.stop() }
+                        .controlSize(.large)
+                        .keyboardShortcut(.cancelAction)
+                        .help(tr("Stops after the file that is being worked on (Esc)"))
+                        .disabled(m.stopping)
+                }
+            }
             Button(actionTitle) { m.run() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
                 .disabled(m.busy || !m.canRun)
         }
+        .animation(.default, value: m.summary)
+        .animation(.default, value: m.busy)
     }
 
     var actionTitle: String {
@@ -460,11 +478,6 @@ struct NameRuleEditor<Extra: View>: View {
                 TextField(tr("Text before the name"), text: $rule.before, prompt: Text(tr("Before"))).labelsHidden().frame(width: 130)
                 Text(tr("+ name +")).foregroundStyle(.secondary)
                 TextField(tr("Text after the name"), text: $rule.after, prompt: Text(tr("After"))).labelsHidden().frame(width: 130)
-            case .replace:
-                Text(tr("Replace"))
-                TextField(tr("Text to replace"), text: $rule.find, prompt: Text(tr("Old text"))).labelsHidden().frame(width: 140)
-                Text(tr("with"))
-                TextField(tr("Replacement text"), text: $rule.replacement, prompt: Text(tr("New text"))).labelsHidden().frame(width: 140)
             case .numbered:
                 Text(tr("New name"))
                 TextField(tr("New name"), text: $rule.pattern, prompt: Text(placeholder)).labelsHidden().frame(width: 180)
@@ -486,12 +499,26 @@ struct NameRuleEditor<Extra: View>: View {
             return []
         case .add:
             return [tr("Adds text in front of and/or behind the current name: “%@” becomes “%@”.", stem + ext, name(0))]
-        case .replace:
-            return [rule.find.isEmpty ? tr("Replaces a word or part of the name wherever it appears.") : tr("“%@” becomes “%@”.", stem + ext, name(0)),
-                    tr("Upper/lower case doesn't matter. Leave “New text” empty to delete the text.")]
         case .numbered:
             return [tr("Example: “%@”, “%@”, …", name(0), name(1)),
                     tr("The whole name is replaced. # marks where the number goes (### = 3 digits).")]
+        }
+    }
+}
+
+/// Lets a new file be dragged from the list to the Finder, Mail or another app
+struct DragOut: ViewModifier {
+    let file: URL?
+
+    func body(content: Content) -> some View {
+        if let file {
+            content
+                .onDrag { NSItemProvider(object: file as NSURL) } preview: {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: file.path)).resizable().frame(width: 48, height: 48)
+                }
+                .help(tr("Drag to put “%@” somewhere else", file.lastPathComponent))
+        } else {
+            content
         }
     }
 }

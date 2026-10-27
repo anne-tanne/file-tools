@@ -49,18 +49,26 @@ struct ToolCommands: Commands {
             Button(tr("Show in Finder")) { m?.showInFinder() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(m?.lastOutputs.isEmpty ?? true)
+            ShareLink(items: m?.lastOutputs ?? []) { Text(tr("Share")) }
+                .disabled(m == nil || m?.busy == true || m?.lastOutputs.isEmpty != false)
         }
         CommandMenu(tr("Tool")) {
-            ForEach(Array(Tool.allCases.enumerated()), id: \.element) { n, t in
-                // ⌘1 to ⌘9 for the first nine tools
-                Button { m?.tool = t } label: { Label(t.title, systemImage: t.icon) }
-                    .keyboardShortcut(n < 9 ? KeyboardShortcut(KeyEquivalent(Character(String(n + 1)))) : nil)
-                    .disabled(m == nil || m?.busy == true)
+            // Same groups and order as the sidebar; ⌘1 to ⌘9 for the first nine tools
+            ForEach(Tool.groups, id: \.title) { g in
+                ForEach(g.tools) { t in
+                    let n = Tool.allCases.firstIndex(of: t)!
+                    Button { m?.tool = t } label: { Label(t.title, systemImage: t.icon) }
+                        .keyboardShortcut(n < 9 ? KeyboardShortcut(KeyEquivalent(Character(String(n + 1)))) : nil)
+                        .disabled(m == nil || m?.busy == true)
+                }
+                Divider()
             }
-            Divider()
             Button(m.map { $0.tool.action } ?? tr("Start")) { m?.run() }
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(m == nil || m?.busy == true || m?.canRun != true)
+            Button(tr("Stop")) { m?.stop() }
+                .keyboardShortcut(".", modifiers: .command)
+                .disabled(m?.canStop != true)
         }
     }
 }

@@ -89,7 +89,7 @@ enum PageSize: String, CaseIterable, Identifiable, Sendable, Titled {
 }
 
 enum NameMode: String, CaseIterable, Identifiable, Sendable, Titled {
-    case keep = "Keep name", add = "Add text", replace = "Replace text", numbered = "New name + number"
+    case keep = "Keep name", add = "Add text", numbered = "New name + number"
     var id: String { rawValue }
 }
 
@@ -97,7 +97,6 @@ enum NameMode: String, CaseIterable, Identifiable, Sendable, Titled {
 struct NameRule: Sendable {
     var mode: NameMode
     var before = "", after = ""          // Add text
-    var find = "", replacement = ""      // Replace text
     var pattern: String                  // New name + number: "Photo ###"
     var start = 1
 
@@ -107,8 +106,6 @@ struct NameRule: Sendable {
         switch mode {
         case .keep: name = stem
         case .add: name = before + stem + after
-        case .replace:
-            name = find.isEmpty ? stem : stem.replacingOccurrences(of: find, with: replacement, options: .caseInsensitive)
         case .numbered:
             let p = pattern.trimmingCharacters(in: .whitespaces)
             name = p.isEmpty ? stem : Self.numbered(p, number: start + index, last: start + count - 1)

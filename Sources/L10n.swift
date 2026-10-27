@@ -67,9 +67,9 @@ enum L10n {
         "Remove camera, date and location info before sharing":
             ("Kamera-, Datums- und Ortsangaben vor dem Teilen entfernen",
              "Supprimer les infos d’appareil, de date et de lieu avant de partager"),
-        "Change file names: add or replace text, or number them":
-            ("Dateinamen ändern: Text hinzufügen oder ersetzen, oder durchnummerieren",
-             "Modifier les noms de fichiers : ajouter ou remplacer du texte, ou les numéroter"),
+        "Change file names: add text or number them":
+            ("Dateinamen ändern: Text hinzufügen oder durchnummerieren",
+             "Modifier les noms de fichiers : ajouter du texte ou les numéroter"),
         "Put photos and PDFs together into one PDF":
             ("Fotos und PDFs zu einem PDF zusammenfügen", "Réunir des photos et des PDF en un seul PDF"),
         "Take pages out of a PDF or cut it into parts":
@@ -103,7 +103,7 @@ enum L10n {
         "Page %d of %d…": ("Seite %d von %d…", "Page %d sur %d…"),
         "%d images": ("%d Bilder", "%d images"),
         ", smallest possible": (", kleinstmöglich", ", taille minimale atteinte"),
-        "Compressed copy deleted": ("Komprimierte Kopie gelöscht", "Copie compressée supprimée"),
+        "Compressed copy moved to Trash": ("Komprimierte Kopie in den Papierkorb gelegt", "Copie compressée placée dans la corbeille"),
         "Not used by this tool": ("Von diesem Werkzeug nicht verwendet", "Non utilisé par cet outil"),
         "Choose": ("Auswählen", "Choisir"),
 
@@ -128,7 +128,6 @@ enum L10n {
         // New names (Rename, Word to PDF)
         "Keep name": ("Name behalten", "Garder le nom"),
         "Add text": ("Text hinzufügen", "Ajouter du texte"),
-        "Replace text": ("Text ersetzen", "Remplacer du texte"),
         "New name + number": ("Neuer Name + Nummer", "Nouveau nom + numéro"),
         "Document ###": ("Dokument ###", "Document ###"),
         "Text before the name": ("Text vor dem Namen", "Texte avant le nom"),
@@ -136,24 +135,11 @@ enum L10n {
         "Before": ("Davor", "Avant"),
         "After": ("Danach", "Après"),
         "+ name +": ("+ Name +", "+ nom +"),
-        "Replace": ("Ersetze", "Remplacer"),
-        "with": ("durch", "par"),
-        "Text to replace": ("Zu ersetzender Text", "Texte à remplacer"),
-        "Replacement text": ("Ersatztext", "Texte de remplacement"),
-        "Old text": ("Alter Text", "Ancien texte"),
-        "New text": ("Neuer Text", "Nouveau texte"),
         "first number %d": ("erste Nummer %d", "premier numéro %d"),
         "Report": ("Bericht", "Rapport"),
         "Adds text in front of and/or behind the current name: “%@” becomes “%@”.":
             ("Fügt Text vor und/oder nach dem bisherigen Namen ein: «%@» wird zu «%@».",
              "Ajoute du texte avant et/ou après le nom actuel : « %@ » devient « %@ »."),
-        "Replaces a word or part of the name wherever it appears.":
-            ("Ersetzt ein Wort oder einen Teil des Namens, wo immer er vorkommt.",
-             "Remplace un mot ou une partie du nom partout où il apparaît."),
-        "“%@” becomes “%@”.": ("«%@» wird zu «%@».", "« %@ » devient « %@ »."),
-        "Upper/lower case doesn't matter. Leave “New text” empty to delete the text.":
-            ("Gross-/Kleinschreibung spielt keine Rolle. «Neuer Text» leer lassen, um den Text zu löschen.",
-             "Majuscules et minuscules indifférentes. Laissez « Nouveau texte » vide pour supprimer le texte."),
         "Example: “%@”, “%@”, …": ("Beispiel: «%@», «%@», …", "Exemple : « %@ », « %@ », …"),
         "The whole name is replaced. # marks where the number goes (### = 3 digits).":
             ("Der ganze Name wird ersetzt. # zeigt, wo die Nummer steht (### = 3 Stellen).",
@@ -339,7 +325,7 @@ enum L10n {
         "Page %d of %d": ("Seite %d von %d", "Page %d sur %d"),
         "Zoom": ("Zoom", "Zoom"),
         "Fit": ("Einpassen", "Ajuster"),
-        "Delete Compressed Copy": ("Komprimierte Kopie löschen", "Supprimer la copie compressée"),
+        "Move Compressed Copy to Trash": ("Komprimierte Kopie in den Papierkorb legen", "Placer la copie compressée dans la corbeille"),
         "Keep": ("Behalten", "Conserver"),
         // Page overview
         "Selected pages": ("Ausgewählte Seiten", "Pages choisies"),
@@ -417,6 +403,20 @@ enum L10n {
         "Menus that come from macOS switch language after the app is restarted.":
             ("Menüs, die von macOS stammen, wechseln die Sprache nach einem Neustart der App.",
              "Les menus fournis par macOS changent de langue après le redémarrage de l’app."),
+        // List undo, sharing, dragging out, stopping
+        "Move": ("Verschieben", "Déplacer"),
+        "Share": ("Teilen", "Partager"),
+        "Send the new files by Mail, Messages, AirDrop and more":
+            ("Die neuen Dateien per Mail, Nachrichten, AirDrop und mehr senden",
+             "Envoyer les nouveaux fichiers par Mail, Messages, AirDrop, etc."),
+        "Drag to put “%@” somewhere else": ("Ziehen, um «%@» woanders abzulegen", "Faire glisser pour déposer « %@ » ailleurs"),
+        "Stop": ("Stoppen", "Arrêter"),
+        "Stopping…": ("Wird gestoppt…", "Arrêt…"),
+        "Stops after the file that is being worked on (Esc)":
+            ("Stoppt nach der Datei, die gerade bearbeitet wird (Esc)", "S’arrête après le fichier en cours (Échap)"),
+        "Stopped. The remaining files were not processed.":
+            ("Gestoppt. Die übrigen Dateien wurden nicht bearbeitet.", "Arrêté. Les fichiers restants n’ont pas été traités."),
+        "Stopped. No PDF was created.": ("Gestoppt. Es wurde kein PDF erstellt.", "Arrêté. Aucun PDF n’a été créé."),
     ]
 }
 

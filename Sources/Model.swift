@@ -7,9 +7,16 @@ import UniformTypeIdentifiers
 enum Tool: String, CaseIterable, Identifiable, Titled {
     case convert = "Convert", compress = "Compress", resize = "Resize"
     case rotate = "Rotate", strip = "Remove Info", rename = "Rename"
-    case combine = "Combine to PDF", split = "Split PDF", reorder = "Reorder Pages"
-    case extractImages = "Extract Images", wordToPDF = "Word to PDF"
+    case wordToPDF = "Word to PDF", combine = "Combine to PDF", split = "Split PDF"
+    case reorder = "Reorder Pages", extractImages = "Extract Images"
     var id: String { rawValue }
+
+    /// Sidebar sections and Tool menu groups, in the order of `allCases` (⌘1 to ⌘9 follow it)
+    static let groups: [(title: String, tools: [Tool])] = [
+        ("Convert & Compress", [.convert, .compress, .resize]),
+        ("Edit", [.rotate, .strip, .rename]),
+        ("PDF", [.wordToPDF, .combine, .split, .reorder, .extractImages]),
+    ]
 
     var icon: String {
         switch self {
@@ -33,7 +40,7 @@ enum Tool: String, CaseIterable, Identifiable, Titled {
         case .resize: tr("Scale photos down to a given size")
         case .rotate: tr("Turn photos or PDF pages")
         case .strip: tr("Remove camera, date and location info before sharing")
-        case .rename: tr("Change file names: add or replace text, or number them")
+        case .rename: tr("Change file names: add text or number them")
         case .combine: tr("Put photos and PDFs together into one PDF")
         case .split: tr("Take pages out of a PDF or cut it into parts")
         case .reorder: tr("Drag PDF pages into a new order")
@@ -79,6 +86,7 @@ struct Item: Identifiable {
     var done = false
     var failed = false
     var output: URL? = nil           // compressed copy, for comparing
+    var outputs: [URL] = []          // new files made from this one, can be dragged out of the list
     var order: [Int]? = nil          // Reorder: original 0-based pages in their new order; nil = unchanged
 
     var pages: [Int] { selected.isEmpty ? Array(0..<pageCount) : selected.sorted() }
@@ -129,6 +137,8 @@ final class Model: ObservableObject {
     @Published var busy = false
     @Published var focused: Item.ID? = nil   // PDF whose pages are shown below the list
     @Published var comparing: Item.ID? = nil
+    @Published var stopping = false
+    private var runner: Task<Void, Never>? = nil   // set while a job that can be stopped runs
 
     var items: [Item] {
         get { spaces[tool]?.items ?? [] }
@@ -195,7 +205,26 @@ final class Model: ObservableObject {
     var eligible: [Item] { items.filter { tool.accepts($0.kind) } }
     var pending: [Item] { eligible.filter { !$0.done } }
     var canRun: Bool { tool == .rename ? renameCount > 0 : !eligible.isEmpty }
-    func clearList() { items.removeAll(); summary = nil; lastRename = [] }
+    /// Keeps the rename undo: the files on disk keep their new names whether or not they are listed
+    func clearList(undo: UndoManager?) { changeItems(tr("Clear List"), undo: undo) { $0.removeAll() }; summary = nil }
+
+    /// Changes the list of the current tool so that ⌘Z brings the old list back
+    func changeItems(_ action: String, undo: UndoManager?, _ change: (inout [Item]) -> Void) {
+        var new = items
+        change(&new)
+        setItems(new, of: tool, action: action, undo: undo)
+    }
+
+    private func setItems(_ new: [Item], of t: Tool, action: String, undo: UndoManager?) {
+        let old = spaces[t]?.items ?? []
+        guard old.map(\.id) != new.map(\.id) else { return }
+        spaces[t, default: Workspace()].items = new
+        undo?.registerUndo(withTarget: self) { m in
+            m.tool = t   // show the list that changes back
+            m.setItems(old, of: t, action: action, undo: undo)
+        }
+        undo?.setActionName(action)
+    }
 
     /// Default texts follow the new language unless they were edited
     func languageChanged(from old: Lang) {
@@ -269,19 +298,24 @@ final class Model: ObservableObject {
         if p.runModal() == .OK { outputFolder = p.url }
     }
 
-    func remove(_ id: Item.ID) { items.removeAll { $0.id == id } }
+    func remove(_ id: Item.ID, undo: UndoManager?) {
+        changeItems(tr("Remove from List"), undo: undo) { $0.removeAll { $0.id == id } }
+    }
 
-    enum SortOrder { case name, date }
-    func sort(_ order: SortOrder) {
-        switch order {
-        case .name: items.sort { $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending }
-        case .date: items.sort { $0.date < $1.date }
+    enum SortOrder { case name, date, reverse }
+    func sort(_ order: SortOrder, undo: UndoManager?) {
+        changeItems(tr("Sort"), undo: undo) {
+            switch order {
+            case .name: $0.sort { $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending }
+            case .date: $0.sort { $0.date < $1.date }
+            case .reverse: $0.reverse()
+            }
         }
     }
 
     func resetStatus() {
         for i in items.indices {
-            items[i].status = tr("Ready"); items[i].done = false; items[i].failed = false; items[i].output = nil
+            items[i].status = tr("Ready"); items[i].done = false; items[i].failed = false; items[i].output = nil; items[i].outputs = []
         }
         summary = nil
         lastOutputs = []
@@ -408,8 +442,9 @@ final class Model: ObservableObject {
         }
         guard !jobs.isEmpty else { return }
         busy = true
-        Task.detached {
+        runner = Task.detached {
             for job in jobs {
+                if Task.isCancelled { break }   // Stop: the file being worked on is finished first
                 await MainActor.run { self.update(job.id) { $0.status = tr("Working…") } }
                 let progress: @Sendable (String) -> Void = { msg in
                     Task { @MainActor in self.update(job.id) { if !$0.done && !$0.failed { $0.status = msg } } }
@@ -420,7 +455,7 @@ final class Model: ObservableObject {
                     self.update(job.id) {
                         switch result {
                         case .success(let o):
-                            $0.status = "✓ " + o.message; $0.done = true; $0.output = o.compareWith
+                            $0.status = "✓ " + o.message; $0.done = true; $0.output = o.compareWith; $0.outputs = o.files
                         case .failure(let e as Skipped):
                             $0.status = e.localizedDescription; $0.done = true
                         case .failure(let e):
@@ -430,8 +465,23 @@ final class Model: ObservableObject {
                 }
             }
             finally()
-            await MainActor.run { self.busy = false }
+            await MainActor.run { self.finish() }
         }
+    }
+
+    var canStop: Bool { runner != nil && !stopping }
+
+    /// Stops after the current file; the remaining files stay as they are
+    func stop() {
+        stopping = true
+        runner?.cancel()
+    }
+
+    private func finish(stopped: String = tr("Stopped. The remaining files were not processed.")) {
+        if stopping { summary = stopped }
+        stopping = false
+        runner = nil
+        busy = false
     }
 
     // MARK: Combine
@@ -478,7 +528,7 @@ final class Model: ObservableObject {
         let jobs = docs.map { (id: $0.id, url: $0.url) }
         for d in docs { update(d.id) { $0.status = tr("Waiting…"); $0.done = false; $0.failed = false } }
         busy = true
-        Task.detached {
+        runner = Task.detached {
             let fm = FileManager.default
             let work = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
             defer { try? fm.removeItem(at: work) }
@@ -486,6 +536,7 @@ final class Model: ObservableObject {
                 try fm.createDirectory(at: work, withIntermediateDirectories: true)
                 var parts: [(url: URL, title: String)] = []
                 for (n, j) in jobs.enumerated() {
+                    if Task.isCancelled { throw CancellationError() }
                     await MainActor.run { self.update(j.id) { $0.status = tr("Word is creating the PDF…") } }
                     let part = work.appendingPathComponent("\(n).pdf")
                     do { try WordOps.toPDF(j.url, options: options, to: part) } catch {
@@ -518,9 +569,9 @@ final class Model: ObservableObject {
                     self.lastOutputs = [out]
                 case .failure(let e):
                     for d in docs { self.update(d.id) { if !$0.failed && !$0.status.hasPrefix("✓") { $0.status = tr("Ready") } } }
-                    self.summary = tr("Error: ") + e.localizedDescription; self.summaryFailed = true
+                    if !(e is CancellationError) { self.summary = tr("Error: ") + e.localizedDescription; self.summaryFailed = true }
                 }
-                self.busy = false
+                self.finish(stopped: tr("Stopped. No PDF was created."))
             }
         }
     }
