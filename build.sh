@@ -14,6 +14,22 @@ if xcrun --find actool >/dev/null 2>&1; then
 else
     cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
+# Finder quick actions (macOS Services handled by the running app, see Services.swift)
+IMG="public.image"; PDF="com.adobe.pdf"
+WORD="org.openxmlformats.wordprocessingml.document com.microsoft.word.doc public.rtf org.oasis-open.opendocument.text"
+SERVICES=""
+service() {   # title, message, UTIs...
+    local title="$1" msg="$2"; shift 2
+    local types=""; for t in "$@"; do types+="<string>$t</string>"; done
+    SERVICES+="<dict><key>NSMenuItem</key><dict><key>default</key><string>$title</string></dict><key>NSMessage</key><string>$msg</string><key>NSPortName</key><string>File Tools</string><key>NSRequiredContext</key><dict/><key>NSSendFileTypes</key><array>$types</array></dict>"
+}
+service "Compress with File Tools" compress $IMG $PDF
+service "Remove Info with File Tools" removeInfo $IMG $PDF
+service "Add Watermark with File Tools" watermark $IMG $PDF
+service "Make Searchable with File Tools" makeSearchable $PDF $IMG
+service "Recognize Text with File Tools" recognizeText $IMG $PDF
+service "Convert Word to PDF with File Tools" wordToPDF $=WORD
+service "Run File Tools Preset…" runPreset $IMG $PDF $=WORD
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -30,6 +46,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleIconName</key><string>AppIcon</string>
 <key>NSAppleEventsUsageDescription</key><string>File Tools asks Microsoft Word to save your Word documents as PDF.</string>
+<key>NSServices</key><array>$SERVICES</array>
 </dict></plist>
 PLIST
 codesign --force --sign - "$APP"

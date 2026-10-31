@@ -4,11 +4,17 @@ import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-enum Tool: String, CaseIterable, Identifiable, Titled {
+enum Tool: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
     case convert = "Convert", compress = "Compress", resize = "Resize"
     case rotate = "Rotate", strip = "Remove Info", rename = "Rename"
     case combine = "Combine to PDF", split = "Split PDF", reorder = "Reorder Pages"
     case extractImages = "Extract Images", wordToPDF = "Word to PDF"
+    case crop = "Crop", removeBackground = "Remove Background", watermark = "Watermark", blackWhite = "Black & White"
+    case iconSet = "Make Icons", contactSheet = "Contact Sheet", duplicates = "Find Duplicates"
+    case recognizeText = "Recognize Text", makeSearchable = "Make Searchable", pageNumbers = "Page Numbers"
+    case password = "Password", flatten = "Flatten"
+    case stitch = "Stitch Images", cleanScan = "Clean Up Scans", redact = "Redact"
+    case extractTables = "Extract Tables", videoToGIF = "Video to GIF"
     var id: String { rawValue }
 
     var icon: String {
@@ -24,12 +30,29 @@ enum Tool: String, CaseIterable, Identifiable, Titled {
         case .reorder: "rectangle.2.swap"
         case .extractImages: "photo.on.rectangle.angled"
         case .wordToPDF: "doc.text"
+        case .crop: "crop"
+        case .removeBackground: "person.and.background.dotted"
+        case .watermark: "signature"
+        case .blackWhite: "circle.lefthalf.filled"
+        case .iconSet: "app.dashed"
+        case .contactSheet: "square.grid.2x2"
+        case .duplicates: "square.on.square"
+        case .recognizeText: "text.viewfinder"
+        case .makeSearchable: "doc.text.magnifyingglass"
+        case .pageNumbers: "number"
+        case .password: "lock.doc"
+        case .flatten: "square.stack.3d.down.right"
+        case .stitch: "rectangle.split.1x2"
+        case .cleanScan: "doc.viewfinder"
+        case .redact: "rectangle.inset.filled"
+        case .extractTables: "tablecells"
+        case .videoToGIF: "film.stack"
         }
     }
     var subtitle: String {
         switch self {
         case .convert: tr("Turn photos into another format, or PDF pages into images")
-        case .compress: tr("Make photos and PDFs smaller while keeping them sharp")
+        case .compress: tr("Make photos, PDFs and videos smaller while keeping them sharp")
         case .resize: tr("Scale photos down to a given size")
         case .rotate: tr("Turn photos or PDF pages")
         case .strip: tr("Remove camera, date and location info before sharing")
@@ -39,6 +62,23 @@ enum Tool: String, CaseIterable, Identifiable, Titled {
         case .reorder: tr("Drag PDF pages into a new order")
         case .extractImages: tr("Save the pictures inside a PDF as separate image files")
         case .wordToPDF: tr("Save Word documents as PDFs with the exact Word layout")
+        case .crop: tr("Cut photos to a standard shape or trim away plain borders")
+        case .removeBackground: tr("Cut the subject out of a photo")
+        case .watermark: tr("Stamp text or a logo on photos and PDFs")
+        case .blackWhite: tr("Turn photos and PDFs into black and white")
+        case .iconSet: tr("Make Mac and Windows icon files from a picture")
+        case .contactSheet: tr("Put many photos on one overview sheet")
+        case .duplicates: tr("Find photos that are the same or look alike")
+        case .recognizeText: tr("Read the text in photos and scanned PDFs into a text file")
+        case .makeSearchable: tr("Add a hidden text layer to scanned PDFs so you can search and copy")
+        case .pageNumbers: tr("Add page numbers to a PDF")
+        case .password: tr("Protect a PDF with a password or remove its password")
+        case .flatten: tr("Burn form fields and notes into the PDF so they can't be edited")
+        case .stitch: tr("Put photos together into one long or wide image")
+        case .cleanScan: tr("Straighten and brighten photos of documents")
+        case .redact: tr("Black out names, numbers and other text for good")
+        case .extractTables: tr("Save the tables in PDFs and photos as CSV files")
+        case .videoToGIF: tr("Make an animated GIF from a video")
         }
     }
     var action: String {
@@ -49,21 +89,33 @@ enum Tool: String, CaseIterable, Identifiable, Titled {
         case .reorder: "Save"
         case .extractImages: "Extract"
         case .wordToPDF: "Create PDFs"
+        case .watermark: "Add Watermark"
+        case .blackWhite: "Convert"
+        case .iconSet: "Make Icons"
+        case .contactSheet: "Create Sheet"
+        case .pageNumbers: "Add Numbers"
+        case .password: "Apply"
+        case .stitch: "Stitch"
+        case .cleanScan: "Clean Up"
+        case .extractTables: "Extract"
+        case .videoToGIF: "Make GIF"
         default: rawValue
         }
     }
     func accepts(_ k: Kind) -> Bool {
         switch self {
-        case .resize: k == .image
-        case .split, .reorder, .extractImages: k == .pdf
+        case .resize, .crop, .removeBackground, .iconSet, .contactSheet, .duplicates, .stitch, .cleanScan: k == .image
+        case .split, .reorder, .extractImages, .pageNumbers, .password, .flatten: k == .pdf
         case .wordToPDF: k == .word
+        case .videoToGIF: k == .video
+        case .compress: k == .image || k == .pdf || k == .video
         case .rename: true
-        default: k != .word
+        default: k == .image || k == .pdf
         }
     }
     /// Tools where the PDF page selection matters
-    var usesPages: Bool { self == .convert || self == .rotate || self == .split || self == .extractImages }
-    var writesFiles: Bool { self != .rename }
+    var usesPages: Bool { self == .convert || self == .rotate || self == .split || self == .extractImages || self == .extractTables }
+    var writesFiles: Bool { self != .rename && self != .duplicates }
 }
 
 struct Item: Identifiable {
@@ -79,6 +131,7 @@ struct Item: Identifiable {
     var done = false
     var failed = false
     var output: URL? = nil           // compressed copy, for comparing
+    var results: [URL] = []          // files (or folders) the last successful run made, for dragging and Quick Look
     var order: [Int]? = nil          // Reorder: original 0-based pages in their new order; nil = unchanged
 
     var pages: [Int] { selected.isEmpty ? Array(0..<pageCount) : selected.sorted() }
@@ -124,77 +177,154 @@ struct Workspace {
 @MainActor
 final class Model: ObservableObject {
     @Published private var spaces: [Tool: Workspace] = [:]
-    @Published var tool: Tool = .convert
+    /// One shared file list for all presets, so the same files can be tried with different presets
+    @Published private var presetSpace = Workspace()
+    @Published var tool: Tool = .convert { didSet { presetID = nil } }
+    @Published var presetID: UUID? = nil     // nil = a tool is shown
+    @Published var savePresetTool: Tool? = nil   // set to open the "Save as Preset" sheet
+    @Published var editingPresetID: UUID? = nil  // set to open the preset editor
+    @Published var presets: [Preset] = [] {
+        didSet { if persist { Preset.save(presets) } }
+    }
     @Published var outputFolder: URL? = nil   // nil = next to the original
     @Published var busy = false
     @Published var focused: Item.ID? = nil   // PDF whose pages are shown below the list
     @Published var comparing: Item.ID? = nil
 
+    /// The preset shown instead of a tool, if any
+    var activePreset: Preset? { presetID.flatMap { id in presets.first { $0.id == id } } }
+    private var space: Workspace {
+        get { activePreset != nil ? presetSpace : spaces[tool] ?? Workspace() }
+        set { if activePreset != nil { presetSpace = newValue } else { spaces[tool] = newValue } }
+    }
+
     var items: [Item] {
-        get { spaces[tool]?.items ?? [] }
-        set { spaces[tool, default: Workspace()].items = newValue }
+        get { space.items }
+        set { space.items = newValue }
     }
     var summary: String? {
-        get { spaces[tool]?.summary }
-        set { spaces[tool, default: Workspace()].summary = newValue; spaces[tool]?.summaryFailed = false }
+        get { space.summary }
+        set { space.summary = newValue; space.summaryFailed = false }
     }
     /// Set after `summary`: shows it as an error
     var summaryFailed: Bool {
-        get { spaces[tool]?.summaryFailed ?? false }
-        set { spaces[tool, default: Workspace()].summaryFailed = newValue }
+        get { space.summaryFailed }
+        set { space.summaryFailed = newValue }
     }
     var lastOutputs: [URL] {
-        get { spaces[tool]?.lastOutputs ?? [] }
-        set { spaces[tool, default: Workspace()].lastOutputs = newValue }
+        get { space.lastOutputs }
+        set { space.lastOutputs = newValue }
     }
 
-    // Convert
-    @Published var format: OutFormat = .jpg
-    @Published var quality: Double = 0.9
-    @Published var dpi: Int = 150
-    // Compress
-    @Published var compressBy: CompressBy = .level
-    @Published var level: Level = .balanced
-    @Published var targetMB: Double = 2
-    // Resize
-    @Published var resizeMode: ResizeMode = .longest
-    @Published var resizeValue: Int = 2000
-    // Rotate
-    @Published var rotation: Int = 90
-    // Remove info
-    @Published var stripMode: StripMode = .all
-    // Combine
-    @Published var pageSize: PageSize = .a4
-    @Published var pageMargin = true
-    @Published var combinedName = tr("Combined")
-    // Split
-    @Published var splitMode: SplitMode = .extract
-    @Published var chunkSize = 5
-    // Extract images
-    @Published var skipSmallImages = true
-    // Word to PDF
-    @Published var wordNaming: WordNaming = .keep
-    @Published var wordPrefix = ""
-    @Published var wordSuffix = ""
-    @Published var wordPattern = tr("Document ###")
-    @Published var wordStart = 1
-    // Rename
-    @Published var renamePattern = tr("Photo ###")
-    @Published var renameStart = 1
+    /// All per-tool settings; saved to UserDefaults on every change
+    @Published var settings = ToolSettings() {
+        didSet {
+            if persist, let d = try? JSONEncoder().encode(settings) { UserDefaults.standard.set(d, forKey: "settings") }
+            if oldValue.renameMode != settings.renameMode { forgetSmartNames() }
+        }
+    }
+    /// Smart Rename: suggested file name (without extension) per file
+    @Published var smartNames: [Item.ID: String] = [:]
+    /// File shown by Quick Look (⌘Y), if any
+    @Published var quickLook: URL? = nil
+    @Published var showWatchFolders = false
+    @Published var duplicates: [URL] = []
+    @Published var pdfPassword = ""   // never stored
     @Published var lastRename: [(from: URL, to: URL)] = []
 
-    var hasPDF: Bool { items.contains { $0.kind == .pdf } }
-    var assignsParts: Bool { tool == .split && splitMode == .extract }
+    /// false = scratch model (preset editor): doesn't read or write settings and presets
+    let persist: Bool
+
+    init(persist: Bool = true) {
+        self.persist = persist
+        guard persist else { return }
+        if let saved = Preset.load() {
+            presets = saved
+        } else {
+            presets = Preset.seeded()
+            Preset.save(presets)   // observers don't run inside init
+        }
+        if let d = UserDefaults.standard.data(forKey: "settings"), let s = try? JSONDecoder().decode(ToolSettings.self, from: d) {
+            settings = s
+        }
+    }
+
+    /// Scratch model of the preset editor: show PDF-only options although there are no files
+    var forcePDF = false
+    var hasPDF: Bool { forcePDF || items.contains { $0.kind == .pdf } }
+    var writesFiles: Bool { activePreset != nil || tool.writesFiles }
+    var assignsParts: Bool { activePreset == nil && tool == .split && settings.splitMode == .extract }
     /// PDF whose page overview is shown: the clicked one, otherwise the first
     var pageItem: Item? {
-        guard tool.usesPages || tool == .reorder else { return nil }
+        guard activePreset == nil, tool.usesPages || tool == .reorder else { return nil }
         let pdfs = eligible.filter { $0.kind == .pdf }
         return pdfs.first { $0.id == focused } ?? pdfs.first
     }
-    var eligible: [Item] { items.filter { tool.accepts($0.kind) } }
+    var eligible: [Item] {
+        if let p = activePreset { return items.filter { p.accepts($0.kind) } }
+        return items.filter { tool.accepts($0.kind) }
+    }
     var pending: [Item] { eligible.filter { !$0.done } }
-    var canRun: Bool { tool == .rename ? renameCount > 0 : !eligible.isEmpty }
-    func clearList() { items.removeAll(); summary = nil; lastRename = [] }
+    var canRun: Bool {
+        if activePreset != nil { return !eligible.isEmpty }
+        return switch tool {
+        case .rename: settings.renameMode == .smart ? (smartMissing > 0 || renameCount > 0) : renameCount > 0
+        case .stitch: eligible.count >= 2
+        case .redact: !eligible.isEmpty && (!settings.redactTermList.isEmpty || settings.redactEmails || settings.redactIBANs || settings.redactPhones)
+        case .password: !eligible.isEmpty && !pdfPassword.isEmpty
+        case .watermark: !eligible.isEmpty && (settings.markKind == .logo ? settings.markLogo != nil : !settings.markText.trimmingCharacters(in: .whitespaces).isEmpty)
+        case .duplicates: eligible.count >= 2
+        default: !eligible.isEmpty
+        }
+    }
+    /// Duplicates found by the last run that are still in the list
+    var duplicatesInList: [URL] {
+        let present = Set(items.map { $0.url.standardizedFileURL })
+        return duplicates.filter { present.contains($0.standardizedFileURL) }
+    }
+    func clearList() { items.removeAll(); summary = nil; lastRename = []; duplicates = []; smartNames = [:] }
+
+    /// Files of the last run plus the results kept on the rows, for Quick Look
+    var previewURLs: [URL] {
+        var seen = Set<URL>()
+        return (lastOutputs + items.flatMap(\.results)).filter { seen.insert($0).inserted }
+    }
+
+    // MARK: Presets
+
+    /// Shows the presets with these files and doesn't run anything: the current preset, otherwise the first
+    func openPresets(_ urls: [URL]) {
+        if activePreset == nil { presetID = presets.first?.id }
+        add(urls)
+    }
+
+    /// Saves one tool with the given settings as a new preset, or as the last step of an existing one
+    func savePreset(name: String, tool: Tool, settings: ToolSettings, addingTo id: UUID? = nil) {
+        let step = PresetStep(tool: tool, settings: settings)
+        if let id, let i = presets.firstIndex(where: { $0.id == id }) {
+            presets[i].steps.append(step)
+        } else {
+            presets.append(Preset(name: name, steps: [step]))
+        }
+    }
+
+    func updatePreset(_ p: Preset) {
+        if let i = presets.firstIndex(where: { $0.id == p.id }) { presets[i] = p }
+    }
+
+    func duplicatePreset(_ id: UUID) {
+        guard let i = presets.firstIndex(where: { $0.id == id }) else { return }
+        var copy = presets[i]
+        copy.id = UUID()
+        copy.name += " " + tr("copy")
+        copy.steps = copy.steps.map { var s = $0; s.id = UUID(); return s }
+        presets.insert(copy, at: i + 1)
+    }
+
+    func deletePreset(_ id: UUID) {
+        if presetID == id { presetID = nil }
+        presets.removeAll { $0.id == id }
+    }
 
     // MARK: Files
 
@@ -215,7 +345,6 @@ final class Model: ObservableObject {
         return (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
     }
 
-    static let imageExtensions: Set = ["heic", "heif", "jpg", "jpeg", "png", "tif", "tiff", "webp", "avif"]
 
     func add(_ urls: [URL]) {
         var expanded: [URL] = []
@@ -230,13 +359,13 @@ final class Model: ObservableObject {
         }
         var existing = Set(items.map { $0.url.standardizedFileURL })
         for u in expanded where existing.insert(u.standardizedFileURL).inserted {
-            let ext = u.pathExtension.lowercased()
-            if Self.imageExtensions.contains(ext) {
-                items.append(Item(url: u, kind: .image, date: Self.date(of: u, kind: .image)))
-            } else if WordOps.extensions.contains(ext), !u.lastPathComponent.hasPrefix("~$") {   // ~$ = Word lock file
-                items.append(Item(url: u, kind: .word, date: Self.date(of: u, kind: .word)))
-            } else if ext == "pdf", let doc = PDFDocument(url: u), doc.pageCount > 0 {
-                items.append(Item(url: u, kind: .pdf, pageCount: doc.pageCount, date: Self.date(of: u, kind: .pdf)))
+            guard let kind = Kind(url: u) else { continue }
+            if kind == .pdf {
+                if let doc = PDFDocument(url: u), (doc.pageCount > 0 || doc.isLocked) {
+                    items.append(Item(url: u, kind: .pdf, pageCount: max(1, doc.pageCount), date: Self.date(of: u, kind: .pdf)))
+                }
+            } else {
+                items.append(Item(url: u, kind: kind, date: Self.date(of: u, kind: kind)))
             }
         }
     }
@@ -245,7 +374,7 @@ final class Model: ObservableObject {
         let p = NSOpenPanel()
         p.allowsMultipleSelection = true
         p.canChooseDirectories = true
-        p.allowedContentTypes = [.image, .pdf, .folder] + WordOps.extensions.compactMap { UTType(filenameExtension: $0) }
+        p.allowedContentTypes = [.image, .pdf, .movie, .folder] + WordOps.extensions.compactMap { UTType(filenameExtension: $0) }
         if p.runModal() == .OK { add(p.urls) }
     }
 
@@ -258,7 +387,7 @@ final class Model: ObservableObject {
         if p.runModal() == .OK { outputFolder = p.url }
     }
 
-    func remove(_ id: Item.ID) { items.removeAll { $0.id == id } }
+    func remove(_ id: Item.ID) { items.removeAll { $0.id == id }; smartNames[id] = nil }
 
     enum SortOrder { case name, date }
     func sort(_ order: SortOrder) {
@@ -270,14 +399,21 @@ final class Model: ObservableObject {
 
     func resetStatus() {
         for i in items.indices {
-            items[i].status = tr("Ready"); items[i].done = false; items[i].failed = false; items[i].output = nil
+            items[i].status = tr("Ready"); items[i].done = false; items[i].failed = false; items[i].output = nil; items[i].results = []
         }
         summary = nil
         lastOutputs = []
+        duplicates = []
     }
 
     func update(_ id: Item.ID, _ f: (inout Item) -> Void) {
         if let i = items.firstIndex(where: { $0.id == id }) { f(&items[i]) }
+    }
+
+    func pickLogo() {
+        let p = NSOpenPanel()
+        p.allowedContentTypes = [.image]
+        if p.runModal() == .OK { settings.markLogo = p.url }
     }
 
     func showInFinder() { NSWorkspace.shared.activateFileViewerSelecting(lastOutputs) }
@@ -285,75 +421,12 @@ final class Model: ObservableObject {
     // MARK: Running
 
     func run() {
+        if let p = activePreset { runPreset(p); return }
         if pending.isEmpty && tool != .rename { resetStatus() }   // "… Again"
         summary = nil
         lastOutputs = []
         let folder = outputFolder
         switch tool {
-        case .convert:
-            let fmt = format, q = quality, dpi = dpi
-            runEach { job, progress in
-                if job.kind == .image {
-                    let out = try ImageOps.convert(job.url, to: fmt, quality: q, folder: folder)
-                    return Outcome(message: out.lastPathComponent, files: [out])
-                }
-                let outs = try PDFOps.toImages(job.url, pages: job.pages, to: fmt, quality: q, dpi: dpi, folder: folder) {
-                    progress(tr("Page %d of %d…", $0, job.pages.count))
-                }
-                return Outcome(message: outs.count == 1 ? outs[0].lastPathComponent : tr("%d images", outs.count), files: outs)
-            }
-        case .compress:
-            let level = level
-            let target: Int64? = compressBy == .target ? Int64(max(0.05, targetMB) * 1_000_000) : nil
-            runEach { job, progress in
-                let before = fileSize(job.url)
-                let out = try Compressor.run(job.url, kind: job.kind, level: level, target: target, folder: folder, progress: progress)
-                let after = fileSize(out)
-                var msg = "\(fmtSize(before)) → \(fmtSize(after)) (−\(Int((Double(before - after) / Double(before) * 100).rounded())) %)"
-                if let target, after > target { msg += tr(", smallest possible") }
-                return Outcome(message: msg, files: [out], compareWith: out)
-            }
-        case .resize:
-            let mode = resizeMode, value = resizeValue
-            runEach { job, _ in
-                let (out, w, h) = try ImageOps.resize(job.url, mode: mode, value: value, folder: folder)
-                return Outcome(message: "\(w)×\(h)", files: [out])
-            }
-        case .rotate:
-            let deg = rotation
-            runEach { job, _ in
-                let out = job.kind == .image
-                    ? try ImageOps.rotate(job.url, degrees: deg, folder: folder)
-                    : try PDFOps.rotate(job.url, pages: job.pages, degrees: deg, folder: folder)
-                return Outcome(message: out.lastPathComponent, files: [out])
-            }
-        case .strip:
-            let mode = stripMode
-            runEach { job, _ in
-                let out = job.kind == .image
-                    ? try ImageOps.strip(job.url, mode: mode, folder: folder)
-                    : try PDFOps.stripInfo(job.url, folder: folder)
-                return Outcome(message: out.lastPathComponent, files: [out])
-            }
-        case .split:
-            let mode = splitMode, chunk = chunkSize
-            runEach { job, _ in
-                let outs = try PDFOps.split(job.url, pages: job.pages, mode: mode, chunk: chunk, parts: job.parts, names: job.partNames, folder: folder)
-                return Outcome(message: outs.count == 1 ? outs[0].lastPathComponent : tr("%d PDFs", outs.count), files: outs)
-            }
-        case .reorder:
-            runEach { job, _ in
-                let out = try PDFOps.reorder(job.url, order: job.pages, folder: folder)
-                return Outcome(message: out.lastPathComponent, files: [out])
-            }
-        case .extractImages:
-            let skipSmall = skipSmallImages
-            runEach { job, progress in
-                let (dir, n) = try PDFImages.extract(job.url, pages: job.pages, skipSmall: skipSmall, folder: folder) {
-                    progress("Page \($0) of \(job.pages.count)…")
-                }
-                return Outcome(message: "\(n) image\(n == 1 ? "" : "s") in “\(dir.lastPathComponent)”", files: [dir])
-            }
         case .wordToPDF:
             guard WordOps.isInstalled else {
                 summary = tr("Microsoft Word is needed for this"); summaryFailed = true
@@ -361,22 +434,46 @@ final class Model: ObservableObject {
             }
             let wasRunning = WordOps.isRunning
             WordOps.stuck = false
-            runEach({ job, progress in
-                progress(tr("Word is creating the PDF…"))
-                let out = try WordOps.toPDF(job.url, name: job.outName ?? job.url.deletingPathExtension().lastPathComponent, folder: folder)
-                let pages = PDFDocument(url: out)?.pageCount ?? 0
-                return Outcome(message: out.lastPathComponent + " · " + (pages == 1 ? tr("1 page") : tr("%d pages", pages)), files: [out])
-            }, finally: { if !wasRunning { WordOps.quitIfIdle() } })
+            let s = settings
+            runEach({ job, progress in try Steps.perform(.wordToPDF, s, job, folder: folder, progress: progress) },
+                    finally: { if !wasRunning { WordOps.quitIfIdle() } })
+        case .contactSheet: makeContactSheet()
+        case .stitch: stitch()
+        case .duplicates: findDuplicates()
         case .combine: combine()
-        case .rename: rename()
+        case .rename:
+            if settings.renameMode == .smart && smartMissing > 0 { suggestNames() } else { rename() }
+        default:
+            let s = settings, pw = pdfPassword, tool = tool
+            runEach { job, progress in try Steps.perform(tool, s, job, folder: folder, password: pw, progress: progress) }
         }
+    }
+
+    private func runPreset(_ p: Preset) {
+        if pending.isEmpty { resetStatus() }
+        summary = nil
+        lastOutputs = []
+        let folder = outputFolder
+        var quit = false
+        if p.steps.contains(where: { $0.tool == .wordToPDF }), eligible.contains(where: { $0.kind == .word }) {
+            guard WordOps.isInstalled else {
+                summary = tr("Microsoft Word is needed for this"); summaryFailed = true
+                return
+            }
+            quit = !WordOps.isRunning
+            WordOps.stuck = false
+        }
+        let quitWord = quit
+        runEach({ job, progress in try Steps.runPreset(p, job, folder: folder, progress: progress) },
+                finally: { if quitWord { WordOps.quitIfIdle() } })
     }
 
     /// Runs `work` for every eligible file in the background, one after another
     private func runEach(_ work: @escaping @Sendable (Job, @escaping @Sendable (String) -> Void) throws -> Outcome,
                          finally: @escaping @Sendable () -> Void = {}) {
-        let reorder = tool == .reorder
-        let names = tool == .wordToPDF ? wordNames() : [:]
+        let plain = activePreset == nil
+        let reorder = plain && tool == .reorder
+        let names = plain && tool == .wordToPDF ? wordNames() : [:]
         let jobs = pending.map {
             Job(id: $0.id, url: $0.url, kind: $0.kind,
                 pages: reorder ? $0.order ?? Array(0..<$0.pageCount) : $0.pages, parts: $0.parts, partNames: $0.partNames,
@@ -396,7 +493,7 @@ final class Model: ObservableObject {
                     self.update(job.id) {
                         switch result {
                         case .success(let o):
-                            $0.status = "✓ " + o.message; $0.done = true; $0.output = o.compareWith
+                            $0.status = "✓ " + o.message; $0.done = true; $0.output = o.compareWith; $0.results = o.files
                         case .failure(let e as Skipped):
                             $0.status = e.localizedDescription; $0.done = true
                         case .failure(let e):
@@ -406,8 +503,48 @@ final class Model: ObservableObject {
                 }
             }
             finally()
-            await MainActor.run { self.busy = false }
+            await MainActor.run {
+                self.summarize(jobs.map(\.id))
+                self.busy = false
+            }
         }
+    }
+
+    /// Size of a file, or of everything inside a folder
+    nonisolated private static func sizeOnDisk(_ u: URL) -> Int64 {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: u.path, isDirectory: &isDir), isDir.boolValue else { return fileSize(u) }
+        let e = FileManager.default.enumerator(at: u, includingPropertiesForKeys: nil)
+        var total: Int64 = 0
+        while let f = e?.nextObject() as? URL { total += fileSize(f) }
+        return total
+    }
+
+    /// "12 done, 1 skipped · 48 MB saved (−63 %)" for the files of the run that just ended
+    private func summarize(_ ids: [Item.ID]) {
+        let ran = items.filter { ids.contains($0.id) }
+        let ok = ran.filter { $0.done && !$0.results.isEmpty }
+        let skipped = ran.filter { $0.done && $0.results.isEmpty }.count
+        let failed = ran.filter { $0.failed }.count
+        var parts: [String] = []
+        if !ok.isEmpty { parts.append(tr("%d done", ok.count)) }
+        if skipped > 0 { parts.append(tr("%d skipped", skipped)) }
+        if failed > 0 { parts.append(tr("%d failed", failed)) }
+        guard !parts.isEmpty else { return }
+        var text = parts.joined(separator: ", ")
+        if !ok.isEmpty {
+            let before = ok.reduce(Int64(0)) { $0 + Self.sizeOnDisk($1.url) }
+            let after = ok.reduce(Int64(0)) { $0 + $1.results.reduce(Int64(0)) { $0 + Self.sizeOnDisk($1) } }
+            // "Saved" only makes sense when the output is the same content, smaller (Compress, Resize, ...), not CSV or GIF
+            let shrinkTools: [Tool] = [.compress, .resize, .strip, .convert]
+            if after < before, before > 0, activePreset != nil || shrinkTools.contains(tool) {
+                text += " · " + tr("%@ saved (−%d %%)", fmtSize(before - after), Int((Double(before - after) / Double(before) * 100).rounded()))
+            } else if after > 0 {
+                text += " · " + fmtSize(after)
+            }
+        }
+        summary = text
+        if ok.isEmpty && skipped == 0 { summaryFailed = true }
     }
 
     // MARK: Combine
@@ -415,10 +552,10 @@ final class Model: ObservableObject {
     private func combine() {
         let parts = eligible
         guard !parts.isEmpty else { return }
-        let name = combinedName.trimmingCharacters(in: .whitespaces).isEmpty ? tr("Combined") : combinedName
+        let name = settings.combinedName.trimmingCharacters(in: .whitespaces).isEmpty ? tr("Combined") : settings.combinedName
         let out = uniqueURL(outputFolder ?? parts[0].url.deletingLastPathComponent(), name, "pdf")
         let entries = parts.map { (url: $0.url, kind: $0.kind) }
-        let pageSize = pageSize, margin = pageMargin
+        let pageSize = settings.pageSize, margin = settings.pageMargin
         for p in parts { update(p.id) { $0.status = tr("Waiting…"); $0.done = false; $0.failed = false } }
         busy = true
         Task.detached {
@@ -443,20 +580,184 @@ final class Model: ObservableObject {
         }
     }
 
+    // MARK: Contact sheet
+
+    private func makeContactSheet() {
+        let parts = eligible
+        guard !parts.isEmpty else { return }
+        let trimmed = settings.sheetName.trimmingCharacters(in: .whitespaces)
+        let name = trimmed.isEmpty ? tr("Contact Sheet") : trimmed
+        let format = settings.sheetFormat
+        let out = uniqueURL(outputFolder ?? parts[0].url.deletingLastPathComponent(), name, format == .pdf ? "pdf" : "jpg")
+        let urls = parts.map { $0.url }
+        let columns = settings.sheetColumns, names = settings.sheetNames
+        for p in parts { update(p.id) { $0.status = tr("Waiting…"); $0.done = false; $0.failed = false } }
+        busy = true
+        Task.detached {
+            let result = Result {
+                try PhotoOps.contactSheet(urls, columns: columns, names: names, format: format, to: out) { n in
+                    let id = parts[n - 1].id
+                    Task { @MainActor in self.update(id) { $0.status = tr("Adding…") } }
+                }
+            }
+            await MainActor.run {
+                switch result {
+                case .success(let pages):
+                    for p in parts { self.update(p.id) { $0.status = "✓ " + tr("Added"); $0.done = true } }
+                    self.summary = format == .pdf
+                        ? tr("Created “%@”: %d pages, %@", out.lastPathComponent, pages, fmtSize(fileSize(out)))
+                        : tr("Created “%@”, %@", out.lastPathComponent, fmtSize(fileSize(out)))
+                    self.lastOutputs = [out]
+                case .failure(let e):
+                    for p in parts { self.update(p.id) { $0.status = tr("Ready") } }
+                    self.summary = tr("Error: ") + e.localizedDescription; self.summaryFailed = true
+                }
+                self.busy = false
+            }
+        }
+    }
+
+    // MARK: Stitch
+
+    private func stitch() {
+        let parts = eligible
+        guard parts.count >= 2 else { return }
+        let trimmed = settings.stitchName.trimmingCharacters(in: .whitespaces)
+        let name = trimmed.isEmpty ? tr("Stitched") : trimmed
+        let format = settings.stitchFormat
+        let out = uniqueURL(outputFolder ?? parts[0].url.deletingLastPathComponent(), name, format == .png ? "png" : "jpg")
+        let urls = parts.map { $0.url }
+        let direction = settings.stitchDirection, spacing = settings.stitchSpacing
+        for p in parts { update(p.id) { $0.status = tr("Waiting…"); $0.done = false; $0.failed = false } }
+        busy = true
+        Task.detached {
+            let result = Result {
+                try Stitch.run(urls, direction: direction, spacing: spacing, format: format, to: out) { n in
+                    let id = parts[n - 1].id
+                    Task { @MainActor in self.update(id) { $0.status = tr("Adding…") } }
+                }
+            }
+            await MainActor.run {
+                switch result {
+                case .success(let size):
+                    for p in parts { self.update(p.id) { $0.status = "✓ " + tr("Added"); $0.done = true } }
+                    self.summary = tr("Created “%@”: %d × %d px, %@", out.lastPathComponent, size.w, size.h, fmtSize(fileSize(out)))
+                    self.lastOutputs = [out]
+                case .failure(let e):
+                    for p in parts { self.update(p.id) { $0.status = tr("Ready") } }
+                    self.summary = tr("Error: ") + e.localizedDescription; self.summaryFailed = true
+                }
+                self.busy = false
+            }
+        }
+    }
+
+    // MARK: Find duplicates
+
+    private func findDuplicates() {
+        let parts = eligible
+        guard parts.count >= 2 else { return }
+        let urls = parts.map { $0.url }
+        let mode = settings.duplicateMode
+        duplicates = []
+        for p in parts { update(p.id) { $0.status = tr("Waiting…"); $0.done = false; $0.failed = false } }
+        busy = true
+        Task.detached {
+            let result = Result {
+                try PhotoOps.findDuplicates(urls, mode: mode) { n in
+                    let id = parts[n - 1].id
+                    Task { @MainActor in self.update(id) { $0.status = tr("Checking…") } }
+                }
+            }
+            await MainActor.run {
+                switch result {
+                case .success(let map):
+                    let keepers = Set(map.values)
+                    for (i, p) in parts.enumerated() {
+                        self.update(p.id) {
+                            if let k = map[i] {
+                                let other = parts[k].url.lastPathComponent
+                                $0.status = mode == .exact ? tr("Same as “%@”", other) : tr("Looks like “%@”", other)
+                            } else {
+                                $0.status = keepers.contains(i) ? "✓ " + tr("Kept") : tr("Unique")
+                            }
+                            $0.done = true
+                        }
+                    }
+                    self.duplicates = map.keys.sorted().map { parts[$0].url }
+                    self.summary = map.isEmpty ? tr("No duplicates found") : map.count == 1 ? tr("1 duplicate found") : tr("%d duplicates found", map.count)
+                case .failure(let e):
+                    for p in parts { self.update(p.id) { $0.status = tr("Ready") } }
+                    self.summary = tr("Error: ") + e.localizedDescription; self.summaryFailed = true
+                }
+                self.busy = false
+            }
+        }
+    }
+
+    /// Moves the found duplicates to the Trash (recoverable) and takes them off the list
+    func moveDuplicatesToTrash() {
+        let urls = duplicatesInList
+        guard !urls.isEmpty else { return }
+        NSWorkspace.shared.recycle(urls) { trashed, error in
+            Task { @MainActor in
+                let gone = Set(trashed.keys.map { $0.standardizedFileURL })
+                self.items.removeAll { gone.contains($0.url.standardizedFileURL) }
+                self.duplicates.removeAll { gone.contains($0.standardizedFileURL) }
+                if let error, trashed.count < urls.count {
+                    self.summary = tr("Error: ") + error.localizedDescription; self.summaryFailed = true
+                } else {
+                    self.summary = trashed.count == 1 ? tr("Moved 1 file to the Trash") : tr("Moved %d files to the Trash", trashed.count)
+                }
+            }
+        }
+    }
+
+    // MARK: Import from iPhone
+
+    private static let scanDate: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    /// Saves scans and photos from Continuity Camera as files and adds them to the list
+    func importScans(_ providers: [NSItemProvider]) {
+        let dir = outputFolder ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        for p in providers {
+            let isPDF = p.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+            guard let type = isPDF ? UTType.pdf : p.registeredTypeIdentifiers.compactMap({ UTType($0) }).first(where: { $0.conforms(to: .image) }) else { continue }
+            p.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, _ in
+                guard let data else { return }
+                Task { @MainActor in
+                    let name = "Scan " + Self.scanDate.string(from: Date())
+                    let url = uniqueURL(dir, name, type.preferredFilenameExtension ?? (isPDF ? "pdf" : "jpg"))
+                    do {
+                        try data.write(to: url)
+                        self.add([url])
+                    } catch {
+                        self.summary = tr("Error: ") + error.localizedDescription; self.summaryFailed = true
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: Word to PDF
 
     /// PDF name (without .pdf) for every Word document, numbered in list order
     func wordNames() -> [Item.ID: String] {
         let docs = eligible
-        let last = wordStart + docs.count - 1
-        let pattern = wordPattern.trimmingCharacters(in: .whitespaces)
+        let last = settings.wordStart + docs.count - 1
+        let pattern = settings.wordPattern.trimmingCharacters(in: .whitespaces)
         var result: [Item.ID: String] = [:]
         for (n, it) in docs.enumerated() {
             let stem = it.url.deletingPathExtension().lastPathComponent
-            switch wordNaming {
+            switch settings.wordNaming {
             case .keep: result[it.id] = stem
-            case .affix: result[it.id] = wordPrefix + stem + wordSuffix
-            case .numbered: result[it.id] = pattern.isEmpty ? stem : Self.renamed(pattern, number: wordStart + n, last: last)
+            case .affix: result[it.id] = settings.wordPrefix + stem + settings.wordSuffix
+            case .numbered: result[it.id] = pattern.isEmpty ? stem : Self.renamed(pattern, number: settings.wordStart + n, last: last)
             }
         }
         return result
@@ -476,15 +777,73 @@ final class Model: ObservableObject {
         return name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
     }
 
+    // MARK: Smart rename
+
+    /// Files that still need a suggested name
+    var smartMissing: Int { items.filter { smartNames[$0.id] == nil }.count }
+
+    private func forgetSmartNames() {
+        smartNames = [:]
+        if var w = spaces[.rename] {
+            for i in w.items.indices where !w.items[i].done { w.items[i].status = tr("Ready"); w.items[i].failed = false }
+            spaces[.rename] = w
+        }
+    }
+
+    /// Reads every file without a suggestion (in the background) and proposes a name; nothing is renamed yet
+    private func suggestNames() {
+        let todo = items.filter { smartNames[$0.id] == nil }.map { (id: $0.id, url: $0.url, kind: $0.kind, date: $0.date) }
+        guard !todo.isEmpty else { return }
+        summary = nil
+        for t in todo { update(t.id) { $0.status = tr("Waiting…"); $0.done = false; $0.failed = false } }
+        busy = true
+        Task.detached {
+            for t in todo {
+                await MainActor.run { self.update(t.id) { $0.status = tr("Reading…") } }
+                let result = Result { try SmartName.suggest(t.url, kind: t.kind, fallbackDate: t.date) }
+                await MainActor.run {
+                    switch result {
+                    case .success(let stem):
+                        self.smartNames[t.id] = stem
+                        self.update(t.id) { $0.status = tr("Suggested") }
+                    case .failure(let e):
+                        self.update(t.id) { $0.status = tr("Error: ") + e.localizedDescription; $0.failed = true }
+                    }
+                }
+            }
+            await MainActor.run {
+                let suggested = todo.filter { self.smartNames[$0.id] != nil }.count
+                if suggested > 0 {
+                    self.summary = suggested == 1 ? tr("1 name suggested. Check it, then click Rename.")
+                        : tr("%d names suggested. Check them, then click Rename.", suggested)
+                }
+                self.busy = false
+            }
+        }
+    }
+
     /// New file name for every file, in list order
     func renamePreview() -> [Item.ID: String] {
-        let pattern = renamePattern.trimmingCharacters(in: .whitespaces)
+        if settings.renameMode == .smart {
+            var used: [String: Int] = [:]
+            var result: [Item.ID: String] = [:]
+            for it in items {
+                guard let stem = smartNames[it.id] else { continue }
+                let ext = it.url.pathExtension
+                let key = it.url.deletingLastPathComponent().path + "/" + stem.lowercased() + "." + ext.lowercased()
+                let n = (used[key] ?? 0) + 1
+                used[key] = n
+                result[it.id] = stem + (n > 1 ? "-\(n)" : "") + (ext.isEmpty ? "" : "." + ext)
+            }
+            return result
+        }
+        let pattern = settings.renamePattern.trimmingCharacters(in: .whitespaces)
         guard !pattern.isEmpty else { return [:] }
-        let last = renameStart + items.count - 1
+        let last = settings.renameStart + items.count - 1
         var result: [Item.ID: String] = [:]
         for (n, it) in items.enumerated() {
             let ext = it.url.pathExtension
-            result[it.id] = Self.renamed(pattern, number: renameStart + n, last: last) + (ext.isEmpty ? "" : "." + ext)
+            result[it.id] = Self.renamed(pattern, number: settings.renameStart + n, last: last) + (ext.isEmpty ? "" : "." + ext)
         }
         return result
     }

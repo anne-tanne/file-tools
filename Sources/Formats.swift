@@ -17,9 +17,23 @@ struct Skipped: LocalizedError {
 protocol Titled: RawRepresentable<String> {}
 extension Titled { var title: String { tr(rawValue) } }
 
-enum Kind: Sendable { case image, pdf, word }
+enum Kind: Sendable {
+    case image, pdf, word, video
 
-enum OutFormat: String, CaseIterable, Identifiable, Sendable {
+    static let imageExtensions: Set = ["heic", "heif", "jpg", "jpeg", "png", "tif", "tiff", "webp", "avif"]
+
+    /// File kind from the extension alone (nil = not a file type the app handles)
+    init?(url: URL) {
+        let ext = url.pathExtension.lowercased()
+        if Self.imageExtensions.contains(ext) { self = .image }
+        else if ext == "pdf" { self = .pdf }
+        else if VideoOps.extensions.contains(ext) { self = .video }
+        else if WordOps.extensions.contains(ext), !url.lastPathComponent.hasPrefix("~$") { self = .word }   // ~$ = Word lock file
+        else { return nil }
+    }
+}
+
+enum OutFormat: String, CaseIterable, Identifiable, Codable, Sendable {
     case jpg = "JPG", png = "PNG", heic = "HEIC", avif = "AVIF", tiff = "TIFF"
     var id: String { rawValue }
     var ext: String { rawValue.lowercased() }
@@ -44,7 +58,7 @@ enum OutFormat: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum Level: String, CaseIterable, Identifiable, Sendable, Titled {
+enum Level: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
     case high = "High quality", balanced = "Balanced", small = "Smallest"
     var id: String { rawValue }
     /// JPEG quality used for photos and for images inside PDFs
@@ -71,30 +85,105 @@ enum Level: String, CaseIterable, Identifiable, Sendable, Titled {
     ]
 }
 
-enum CompressBy: String, CaseIterable, Identifiable, Titled { case level = "Quality level", target = "Target size"; var id: String { rawValue } }
+enum CompressBy: String, CaseIterable, Identifiable, Codable, Titled { case level = "Quality level", target = "Target size"; var id: String { rawValue } }
 
-enum ResizeMode: String, CaseIterable, Identifiable, Sendable, Titled {
+enum ResizeMode: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
     case longest = "Longest side", width = "Width", height = "Height", percent = "Percentage"
     var id: String { rawValue }
 }
 
-enum StripMode: String, CaseIterable, Identifiable, Sendable, Titled {
+enum StripMode: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
     case all = "Everything", location = "Location only"
     var id: String { rawValue }
 }
 
-enum PageSize: String, CaseIterable, Identifiable, Sendable, Titled {
+enum PageSize: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
     case a4 = "A4", letter = "US Letter", fit = "Same as image"
     var id: String { rawValue }
 }
 
-enum WordNaming: String, CaseIterable, Identifiable, Sendable, Titled {
+enum WordNaming: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
     case keep = "Original name", affix = "Add text", numbered = "Numbered"
     var id: String { rawValue }
 }
 
-enum SplitMode: String, CaseIterable, Identifiable, Sendable, Titled {
+enum SplitMode: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
     case extract = "Selected pages", each = "Each page separately", chunks = "Every few pages"
+    var id: String { rawValue }
+}
+
+enum CropAspect: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
+    case square = "1:1", portrait = "4:5", classic = "4:3", photo = "3:2", wide = "16:9", trim = "Trim borders"
+    var id: String { rawValue }
+    /// Long side / short side; nil for trimming
+    var ratio: Double? {
+        switch self {
+        case .square: 1
+        case .portrait: 5.0 / 4
+        case .classic: 4.0 / 3
+        case .photo: 3.0 / 2
+        case .wide: 16.0 / 9
+        case .trim: nil
+        }
+    }
+}
+
+enum BackgroundFill: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
+    case transparent = "Transparent", white = "White"
+    var id: String { rawValue }
+}
+
+enum MarkKind: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
+    case text = "Text", logo = "Logo"
+    var id: String { rawValue }
+}
+
+enum MarkPosition: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
+    case bottomRight = "Bottom right", center = "Center", diagonal = "Diagonal", tiled = "Tiled"
+    var id: String { rawValue }
+}
+
+/// What to stamp on photos or PDF pages
+struct Watermark: Sendable {
+    var text: String
+    var logo: URL?            // used instead of the text when set
+    var position: MarkPosition
+    var opacity: Double       // 0.1…1
+    var size: Double          // width of the mark as a fraction of the image or page width, 0.1…0.8
+}
+
+enum IconFormats: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
+    case both = "Mac and Windows", icns = "Mac (.icns)", ico = "Windows (.ico)"
+    var id: String { rawValue }
+}
+
+enum SheetFormat: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
+    case pdf = "PDF", jpg = "JPG"
+    var id: String { rawValue }
+}
+
+enum DuplicateMode: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
+    case similar = "Look alike", exact = "Identical files"
+    var id: String { rawValue }
+}
+
+enum NumberStyle: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
+    case plain = "1", ofTotal = "1 of 12", slash = "1 / 12"
+    var id: String { rawValue }
+}
+
+enum NumberPosition: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
+    case bottomCenter = "Bottom center", bottomRight = "Bottom right", topRight = "Top right"
+    var id: String { rawValue }
+}
+
+enum RenameMode: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
+    case numbered = "Numbered", smart = "From content"
+    var id: String { rawValue }
+}
+
+enum PasswordMode: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
+    case add = "Add password", remove = "Remove password"
     var id: String { rawValue }
 }
 
@@ -155,3 +244,19 @@ func rangeString(_ pages: Set<Int>) -> String {
     }
     return parts.joined(separator: ", ")
 }
+
+// MARK: - Async from engine code
+
+/// Runs async work (Vision, AVFoundation, Foundation Models) from the synchronous engine code, which always
+/// runs on a background thread, and waits for the result. Never call it on the main thread.
+func waitFor<T: Sendable>(_ op: @escaping @Sendable () async throws -> T) throws -> T {
+    let box = ResultBox<T>(), done = DispatchSemaphore(value: 0)
+    Task.detached {
+        do { box.result = .success(try await op()) } catch { box.result = .failure(error) }
+        done.signal()
+    }
+    done.wait()
+    return try box.result!.get()
+}
+
+private final class ResultBox<T>: @unchecked Sendable { var result: Result<T, Error>? }

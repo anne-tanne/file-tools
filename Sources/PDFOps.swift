@@ -192,7 +192,7 @@ enum PDFOps {
                 }
             case .image:
                 result.insert(try imagePage(e.url, pageSize: pageSize, margin: margin), at: result.pageCount)
-            case .word:
+            case .word, .video:
                 break   // not accepted by Combine
             }
         }
