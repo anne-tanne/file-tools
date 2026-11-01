@@ -5,17 +5,27 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum Tool: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
-    case convert = "Convert", compress = "Compress", resize = "Resize"
-    case rotate = "Rotate", strip = "Remove Info", rename = "Rename"
-    case combine = "Combine to PDF", split = "Split PDF", reorder = "Reorder Pages"
-    case extractImages = "Extract Images", wordToPDF = "Word to PDF"
+    // Same order as `groups`
+    case convert = "Convert", compress = "Compress", resize = "Resize", videoToGIF = "Video to GIF"
     case crop = "Crop", removeBackground = "Remove Background", watermark = "Watermark", blackWhite = "Black & White"
-    case iconSet = "Make Icons", contactSheet = "Contact Sheet", duplicates = "Find Duplicates"
-    case recognizeText = "Recognize Text", makeSearchable = "Make Searchable", pageNumbers = "Page Numbers"
-    case password = "Password", flatten = "Flatten"
-    case stitch = "Stitch Images", cleanScan = "Clean Up Scans", redact = "Redact"
-    case extractTables = "Extract Tables", videoToGIF = "Video to GIF"
+    case iconSet = "Make Icons", contactSheet = "Contact Sheet", stitch = "Stitch Images", cleanScan = "Clean Up Scans"
+    case duplicates = "Find Duplicates"
+    case rotate = "Rotate", strip = "Remove Info", rename = "Rename", recognizeText = "Recognize Text"
+    case wordToPDF = "Word to PDF", combine = "Combine to PDF", split = "Split PDF"
+    case reorder = "Reorder Pages", extractImages = "Extract Images", makeSearchable = "Make Searchable"
+    case pageNumbers = "Page Numbers", password = "Password", flatten = "Flatten", redact = "Redact"
+    case extractTables = "Extract Tables"
     var id: String { rawValue }
+
+    /// Sidebar sections and Tool menu groups, in the order of `allCases` (⌘1 to ⌘9 follow it).
+    /// `key` remembers a folded sidebar section.
+    static let groups: [(title: String, key: String, tools: [Tool])] = [
+        ("Convert & Compress", "convert", [.convert, .compress, .resize, .videoToGIF]),
+        ("Photos", "photos", [.crop, .removeBackground, .watermark, .blackWhite, .iconSet, .contactSheet, .stitch, .cleanScan, .duplicates]),
+        ("Edit", "edit", [.rotate, .strip, .rename, .recognizeText]),
+        ("PDF", "pdf", [.wordToPDF, .combine, .split, .reorder, .extractImages, .makeSearchable, .pageNumbers,
+                        .password, .flatten, .redact, .extractTables]),
+    ]
 
     var icon: String {
         switch self {
@@ -56,7 +66,7 @@ enum Tool: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
         case .resize: tr("Scale photos down to a given size")
         case .rotate: tr("Turn photos or PDF pages")
         case .strip: tr("Remove camera, date and location info before sharing")
-        case .rename: tr("Give a set of files consistent, numbered names")
+        case .rename: tr("Change file names: add text or number them")
         case .combine: tr("Put photos and PDFs together into one PDF")
         case .split: tr("Take pages out of a PDF or cut it into parts")
         case .reorder: tr("Drag PDF pages into a new order")
@@ -83,23 +93,23 @@ enum Tool: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
     }
     var action: String {
         switch self {
-        case .strip: "Remove Info"
-        case .combine: "Create PDF"
-        case .split: "Split"
-        case .reorder: "Save"
-        case .extractImages: "Extract"
-        case .wordToPDF: "Create PDFs"
-        case .watermark: "Add Watermark"
-        case .blackWhite: "Convert"
-        case .iconSet: "Make Icons"
-        case .contactSheet: "Create Sheet"
-        case .pageNumbers: "Add Numbers"
-        case .password: "Apply"
-        case .stitch: "Stitch"
-        case .cleanScan: "Clean Up"
-        case .extractTables: "Extract"
-        case .videoToGIF: "Make GIF"
-        default: rawValue
+        case .strip: tr("Remove Info")
+        case .combine: tr("Create PDF")
+        case .split: tr("Split")
+        case .reorder: tr("Save")
+        case .extractImages: tr("Extract")
+        case .wordToPDF: tr("Create PDFs")
+        case .watermark: tr("Add Watermark")
+        case .blackWhite: tr("Convert")
+        case .iconSet: tr("Make Icons")
+        case .contactSheet: tr("Create Sheet")
+        case .pageNumbers: tr("Add Numbers")
+        case .password: tr("Apply")
+        case .stitch: tr("Stitch")
+        case .cleanScan: tr("Clean Up")
+        case .extractTables: tr("Extract")
+        case .videoToGIF: tr("Make GIF")
+        default: title
         }
     }
     func accepts(_ k: Kind) -> Bool {
@@ -190,6 +200,8 @@ final class Model: ObservableObject {
     @Published var busy = false
     @Published var focused: Item.ID? = nil   // PDF whose pages are shown below the list
     @Published var comparing: Item.ID? = nil
+    @Published var stopping = false
+    private var runner: Task<Void, Never>? = nil   // set while a job that can be stopped runs
 
     /// The preset shown instead of a tool, if any
     var activePreset: Preset? { presetID.flatMap { id in presets.first { $0.id == id } } }
@@ -282,7 +294,45 @@ final class Model: ObservableObject {
         let present = Set(items.map { $0.url.standardizedFileURL })
         return duplicates.filter { present.contains($0.standardizedFileURL) }
     }
-    func clearList() { items.removeAll(); summary = nil; lastRename = []; duplicates = []; smartNames = [:] }
+    /// Keeps the rename undo: the files on disk keep their new names whether or not they are listed
+    func clearList(undo: UndoManager?) { changeItems(tr("Clear List"), undo: undo) { $0.removeAll() }; summary = nil }
+
+    /// Changes the shown list (a tool's or the presets') so that ⌘Z brings the old list back
+    func changeItems(_ action: String, undo: UndoManager?, _ change: (inout [Item]) -> Void) {
+        var new = items
+        change(&new)
+        setItems(new, tool: tool, preset: presetID, action: action, undo: undo)
+    }
+
+    private func setItems(_ new: [Item], tool t: Tool, preset: UUID?, action: String, undo: UndoManager?) {
+        // Show the list that changes back; a deleted preset has no list to restore
+        if let preset {
+            guard presets.contains(where: { $0.id == preset }) else { return }
+            if presetID != preset { presetID = preset }
+        } else if presetID != nil || tool != t {
+            tool = t
+        }
+        let old = items
+        guard old.map(\.id) != new.map(\.id) else { return }
+        items = new
+        undo?.registerUndo(withTarget: self) { m in m.setItems(old, tool: t, preset: preset, action: action, undo: undo) }
+        undo?.setActionName(action)
+    }
+
+    /// Default texts follow the new language unless they were edited
+    func languageChanged(from old: Lang) {
+        func follow(_ s: inout String, _ key: String) { if s == L10n.text(key, old) { s = tr(key) } }
+        follow(&settings.renameRule.pattern, "Photo ###")
+        follow(&settings.wordRule.pattern, "Document ###")
+        follow(&settings.combinedName, "Combined")
+        follow(&settings.wordCombinedName, "Combined")
+        follow(&settings.sheetName, "Contact Sheet")
+        follow(&settings.stitchName, "Stitched")
+        for t in spaces.keys {
+            for i in spaces[t]!.items.indices { follow(&spaces[t]!.items[i].status, "Ready") }
+        }
+        for i in presetSpace.items.indices { follow(&presetSpace.items[i].status, "Ready") }
+    }
 
     /// Files of the last run plus the results kept on the rows, for Quick Look
     var previewURLs: [URL] {
@@ -387,13 +437,18 @@ final class Model: ObservableObject {
         if p.runModal() == .OK { outputFolder = p.url }
     }
 
-    func remove(_ id: Item.ID) { items.removeAll { $0.id == id }; smartNames[id] = nil }
+    func remove(_ id: Item.ID, undo: UndoManager?) {
+        changeItems(tr("Remove from List"), undo: undo) { $0.removeAll { $0.id == id } }
+    }
 
-    enum SortOrder { case name, date }
-    func sort(_ order: SortOrder) {
-        switch order {
-        case .name: items.sort { $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending }
-        case .date: items.sort { $0.date < $1.date }
+    enum SortOrder { case name, date, reverse }
+    func sort(_ order: SortOrder, undo: UndoManager?) {
+        changeItems(tr("Sort"), undo: undo) {
+            switch order {
+            case .name: $0.sort { $0.url.lastPathComponent.localizedStandardCompare($1.url.lastPathComponent) == .orderedAscending }
+            case .date: $0.sort { $0.date < $1.date }
+            case .reverse: $0.reverse()
+            }
         }
     }
 
@@ -434,6 +489,7 @@ final class Model: ObservableObject {
             }
             let wasRunning = WordOps.isRunning
             WordOps.stuck = false
+            if settings.wordCombine { combineWord(wasRunning: wasRunning); return }
             let s = settings
             runEach({ job, progress in try Steps.perform(.wordToPDF, s, job, folder: folder, progress: progress) },
                     finally: { if !wasRunning { WordOps.quitIfIdle() } })
@@ -473,7 +529,7 @@ final class Model: ObservableObject {
                          finally: @escaping @Sendable () -> Void = {}) {
         let plain = activePreset == nil
         let reorder = plain && tool == .reorder
-        let names = plain && tool == .wordToPDF ? wordNames() : [:]
+        let names = plain && tool == .wordToPDF ? wordPDFNames() : [:]
         let jobs = pending.map {
             Job(id: $0.id, url: $0.url, kind: $0.kind,
                 pages: reorder ? $0.order ?? Array(0..<$0.pageCount) : $0.pages, parts: $0.parts, partNames: $0.partNames,
@@ -481,8 +537,9 @@ final class Model: ObservableObject {
         }
         guard !jobs.isEmpty else { return }
         busy = true
-        Task.detached {
+        runner = Task.detached {
             for job in jobs {
+                if Task.isCancelled { break }   // Stop: the file being worked on is finished first
                 await MainActor.run { self.update(job.id) { $0.status = tr("Working…") } }
                 let progress: @Sendable (String) -> Void = { msg in
                     Task { @MainActor in self.update(job.id) { if !$0.done && !$0.failed { $0.status = msg } } }
@@ -505,9 +562,24 @@ final class Model: ObservableObject {
             finally()
             await MainActor.run {
                 self.summarize(jobs.map(\.id))
-                self.busy = false
+                self.finish()
             }
         }
+    }
+
+    var canStop: Bool { runner != nil && !stopping }
+
+    /// Stops after the current file; the remaining files stay as they are
+    func stop() {
+        stopping = true
+        runner?.cancel()
+    }
+
+    private func finish(stopped: String = tr("Stopped. The remaining files were not processed.")) {
+        if stopping { summary = [stopped, summary].compactMap { $0 }.joined(separator: " · ") }
+        stopping = false
+        runner = nil
+        busy = false
     }
 
     /// Size of a file, or of everything inside a folder
@@ -746,36 +818,77 @@ final class Model: ObservableObject {
 
     // MARK: Word to PDF
 
-    /// PDF name (without .pdf) for every Word document, numbered in list order
-    func wordNames() -> [Item.ID: String] {
+    /// All Word documents into one PDF, in list order, with a bookmark per document
+    private func combineWord(wasRunning: Bool) {
         let docs = eligible
-        let last = settings.wordStart + docs.count - 1
-        let pattern = settings.wordPattern.trimmingCharacters(in: .whitespaces)
+        guard !docs.isEmpty else { return }
+        let options = WordOps.Options(final: settings.wordFinal, updateFields: settings.wordUpdateFields)
+        let level: Level? = settings.wordCompress ? settings.wordLevel : nil
+        let trimmed = settings.wordCombinedName.trimmingCharacters(in: .whitespaces)
+        let name = trimmed.isEmpty ? tr("Combined") : trimmed
+        let out = uniqueURL(outputFolder ?? docs[0].url.deletingLastPathComponent(), name, "pdf")
+        let jobs = docs.map { (id: $0.id, url: $0.url) }
+        for d in docs { update(d.id) { $0.status = tr("Waiting…"); $0.done = false; $0.failed = false } }
+        busy = true
+        runner = Task.detached {
+            let fm = FileManager.default
+            let work = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            defer { try? fm.removeItem(at: work) }
+            func build() async throws -> Int {
+                try fm.createDirectory(at: work, withIntermediateDirectories: true)
+                var parts: [(url: URL, title: String)] = []
+                for (n, j) in jobs.enumerated() {
+                    if Task.isCancelled { throw CancellationError() }
+                    await MainActor.run { self.update(j.id) { $0.status = tr("Word is creating the PDF…") } }
+                    let part = work.appendingPathComponent("\(n).pdf")
+                    do { try WordOps.toPDF(j.url, options: options, to: part) } catch {
+                        await MainActor.run { self.update(j.id) { $0.status = tr("Error: ") + error.localizedDescription; $0.failed = true } }
+                        // Say which file stopped the whole PDF
+                        throw ConvError("\(j.url.lastPathComponent): \(error.localizedDescription)")
+                    }
+                    let pages = PDFDocument(url: part)?.pageCount ?? 0
+                    await MainActor.run { self.update(j.id) { $0.status = "✓ " + (pages == 1 ? tr("1 page") : tr("%d pages", pages)) } }
+                    parts.append((part, j.url.deletingPathExtension().lastPathComponent))
+                }
+                let tmp = work.appendingPathComponent("combined.pdf")
+                let pages = try PDFOps.merge(parts, to: tmp)
+                if let level {
+                    await MainActor.run { self.summary = tr("Compressing…") }
+                    _ = try Compressor.shrinkPDF(tmp, level: level)
+                }
+                do { try fm.moveItem(at: tmp, to: out) } catch { throw ConvError(tr("Can't write to destination")) }
+                showExtension(out)
+                return pages
+            }
+            let result: Result<Int, Error>
+            do { result = .success(try await build()) } catch { result = .failure(error) }
+            if !wasRunning { WordOps.quitIfIdle() }
+            await MainActor.run {
+                switch result {
+                case .success(let pages):
+                    for d in docs { self.update(d.id) { $0.done = true } }
+                    self.summary = tr("Created “%@”: %d pages, %@", out.lastPathComponent, pages, fmtSize(fileSize(out)))
+                    self.lastOutputs = [out]
+                case .failure(let e):
+                    for d in docs { self.update(d.id) { if !$0.failed && !$0.status.hasPrefix("✓") { $0.status = tr("Ready") } } }
+                    if !(e is CancellationError) { self.summary = tr("Error: ") + e.localizedDescription; self.summaryFailed = true }
+                }
+                self.finish(stopped: tr("Stopped. No PDF was created."))
+            }
+        }
+    }
+
+    /// PDF name (without .pdf) for every Word document, in list order
+    func wordPDFNames() -> [Item.ID: String] {
+        let docs = eligible
         var result: [Item.ID: String] = [:]
         for (n, it) in docs.enumerated() {
-            let stem = it.url.deletingPathExtension().lastPathComponent
-            switch settings.wordNaming {
-            case .keep: result[it.id] = stem
-            case .affix: result[it.id] = settings.wordPrefix + stem + settings.wordSuffix
-            case .numbered: result[it.id] = pattern.isEmpty ? stem : Self.renamed(pattern, number: settings.wordStart + n, last: last)
-            }
+            result[it.id] = settings.wordRule.apply(it.url.deletingPathExtension().lastPathComponent, index: n, count: docs.count)
         }
         return result
     }
 
     // MARK: Rename
-
-    /// "Photo ###" + 7 → "Photo 007"; without # the number is appended
-    static func renamed(_ pattern: String, number: Int, last: Int) -> String {
-        let name: String
-        if let r = pattern.range(of: "#+", options: .regularExpression) {
-            let width = pattern.distance(from: r.lowerBound, to: r.upperBound)
-            name = pattern.replacingCharacters(in: r, with: String(format: "%0\(width)d", number))
-        } else {
-            name = pattern + " " + String(format: "%0\(max(2, String(last).count))d", number)
-        }
-        return name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-    }
 
     // MARK: Smart rename
 
@@ -797,8 +910,9 @@ final class Model: ObservableObject {
         summary = nil
         for t in todo { update(t.id) { $0.status = tr("Waiting…"); $0.done = false; $0.failed = false } }
         busy = true
-        Task.detached {
+        runner = Task.detached {
             for t in todo {
+                if Task.isCancelled { break }
                 await MainActor.run { self.update(t.id) { $0.status = tr("Reading…") } }
                 let result = Result { try SmartName.suggest(t.url, kind: t.kind, fallbackDate: t.date) }
                 await MainActor.run {
@@ -817,7 +931,7 @@ final class Model: ObservableObject {
                     self.summary = suggested == 1 ? tr("1 name suggested. Check it, then click Rename.")
                         : tr("%d names suggested. Check them, then click Rename.", suggested)
                 }
-                self.busy = false
+                self.finish(stopped: tr("Stopped. The remaining files were not read."))
             }
         }
     }
@@ -837,13 +951,11 @@ final class Model: ObservableObject {
             }
             return result
         }
-        let pattern = settings.renamePattern.trimmingCharacters(in: .whitespaces)
-        guard !pattern.isEmpty else { return [:] }
-        let last = settings.renameStart + items.count - 1
         var result: [Item.ID: String] = [:]
         for (n, it) in items.enumerated() {
             let ext = it.url.pathExtension
-            result[it.id] = Self.renamed(pattern, number: settings.renameStart + n, last: last) + (ext.isEmpty ? "" : "." + ext)
+            let stem = it.url.deletingPathExtension().lastPathComponent
+            result[it.id] = settings.renameRule.apply(stem, index: n, count: items.count) + (ext.isEmpty ? "" : "." + ext)
         }
         return result
     }

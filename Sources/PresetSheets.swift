@@ -19,25 +19,25 @@ struct SavePresetSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("Save as Preset", systemImage: "star").font(.headline)
-            Text("A preset runs several steps one after another on every file. This one starts with “\(tool.title)” and its current settings.")
+            Label(tr("Save as Preset"), systemImage: "star").font(.headline)
+            Text(tr("A preset runs several steps one after another on every file. This one starts with “%@” and its current settings.", tool.title))
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Picker("Save as", selection: $target) {
-                Text("New preset").tag(UUID?.none)
+            Picker(tr("Save as"), selection: $target) {
+                Text(tr("New preset")).tag(UUID?.none)
                 if !m.presets.isEmpty {
                     Divider()
-                    ForEach(m.presets) { p in Text("Add as step to “\(p.name)”").tag(Optional(p.id)) }
+                    ForEach(m.presets) { p in Text(tr("Add as step to “%@”", p.name)).tag(Optional(p.id)) }
                 }
             }
             .pickerStyle(.menu)
             if target == nil {
-                TextField("Name", text: $name, prompt: Text("Preset name"))
+                TextField(tr("Name"), text: $name, prompt: Text(tr("Preset name")))
             }
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save") {
+                Button(tr("Cancel"), role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(tr("Save")) {
                     m.savePreset(name: trimmed, tool: tool, settings: m.settings, addingTo: target)
                     dismiss()
                 }
@@ -76,11 +76,11 @@ struct EditPresetSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            TextField("Name", text: $draft.name, prompt: Text("Preset name"))
+            TextField(tr("Name"), text: $draft.name, prompt: Text(tr("Preset name")))
                 .font(.title3)
 
             HStack {
-                Text("Steps, in this order").font(.headline)
+                Text(tr("Steps, in this order")).font(.headline)
                 Spacer()
                 Menu {
                     ForEach(Tool.chainable) { t in
@@ -88,7 +88,7 @@ struct EditPresetSheet: View {
                             .disabled(t == .recognizeText && draft.steps.contains { $0.tool == .recognizeText })
                     }
                 } label: {
-                    Label("Add Step", systemImage: "plus")
+                    Label(tr("Add Step"), systemImage: "plus")
                 }
                 .fixedSize()
             }
@@ -100,9 +100,9 @@ struct EditPresetSheet: View {
                         Label(step.tool.title, systemImage: step.tool.icon)
                         Text(step.settings.summary(for: step.tool)).foregroundStyle(.secondary).lineLimit(1)
                         Spacer()
-                        Button { remove(step.id) } label: { Label("Delete Step", systemImage: "minus.circle.fill") }
+                        Button { remove(step.id) } label: { Label(tr("Delete Step"), systemImage: "minus.circle.fill") }
                             .labelStyle(.iconOnly).buttonStyle(.borderless).foregroundStyle(.secondary)
-                            .help("Delete this step")
+                            .help(tr("Delete this step"))
                     }
                     .tag(step.id)
                 }
@@ -111,7 +111,7 @@ struct EditPresetSheet: View {
             .frame(minHeight: 110, idealHeight: 130, maxHeight: 150)
             .overlay {
                 if draft.steps.isEmpty {
-                    ContentUnavailableView("No Steps", systemImage: "list.number", description: Text("Add a step to get started."))
+                    ContentUnavailableView(tr("No Steps"), systemImage: "list.number", description: Text(tr("Add a step to get started.")))
                 }
             }
 
@@ -128,15 +128,15 @@ struct EditPresetSheet: View {
             Spacer(minLength: 0)
             Divider()
             HStack {
-                Button("Delete Preset…", role: .destructive) { confirmDelete = true }
-                    .confirmationDialog("Delete this preset?", isPresented: $confirmDelete) {
-                        Button("Delete “\(draft.name)”", role: .destructive) { m.deletePreset(draft.id); dismiss() }
+                Button(tr("Delete Preset…"), role: .destructive) { confirmDelete = true }
+                    .confirmationDialog(tr("Delete this preset?"), isPresented: $confirmDelete) {
+                        Button(tr("Delete “%@”", draft.name), role: .destructive) { m.deletePreset(draft.id); dismiss() }
                     } message: {
-                        Text("The preset is removed. Your files are not touched.")
+                        Text(tr("The preset is removed. Your files are not touched."))
                     }
                 Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save") { m.updatePreset(draft); dismiss() }
+                Button(tr("Cancel"), role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(tr("Save")) { m.updatePreset(draft); dismiss() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(draft.name.trimmingCharacters(in: .whitespaces).isEmpty || draft.steps.isEmpty)

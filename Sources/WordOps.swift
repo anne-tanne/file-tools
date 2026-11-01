@@ -32,6 +32,8 @@ enum WordOps {
     on run argv
         set src to item 1 of argv
         set dst to item 2 of argv
+        set clean to (item 3 of argv) is "1"
+        set refresh to (item 4 of argv) is "1"
         tell application "Microsoft Word" to open (POSIX file src) read only true add to recent files false
         set i to 0
         repeat 40 times
@@ -41,7 +43,36 @@ enum WordOps {
         end repeat
         if i = 0 then error "NOT_OPENED"
         try
-            tell application "Microsoft Word" to save as document i file name dst file format format PDF
+            tell application "Microsoft Word"
+                if clean then
+                    try
+                        accept all revisions document i
+                    end try
+                    try
+                        delete all comments document i
+                    end try
+                end if
+                if refresh then
+                    -- otherwise updated fields show up as tracked changes
+                    try
+                        set track revisions of document i to false
+                    end try
+                    -- fields that ask for input or point to other files would open a dialog or fail
+                    set skip to {field ask, field fill in, field include, field include picture, field include text, field link}
+                    repeat with k from 1 to (count of fields of document i)
+                        try
+                            if field type of field k of document i is not in skip then update field (field k of document i)
+                        end try
+                    end repeat
+                    -- last, so the page numbers match the final text
+                    repeat with k from 1 to (count of tables of contents of document i)
+                        try
+                            update (table of contents k of document i)
+                        end try
+                    end repeat
+                end if
+                save as document i file name dst file format format PDF
+            end tell
         on error e
             set i to my findIndex(src)
             if i > 0 then tell application "Microsoft Word" to close document i saving no
@@ -56,7 +87,13 @@ enum WordOps {
     /// Set when Word stops responding, so the rest of the batch doesn't wait for it file by file (jobs run one at a time)
     nonisolated(unsafe) static var stuck = false
 
-    static func toPDF(_ src: URL, name: String, folder: URL?) throws -> URL {
+    struct Options: Sendable {
+        var final = true          // accept tracked changes and drop comments, so no markup ends up in the PDF
+        var updateFields = true   // fields and tables of contents, as Word would before printing
+    }
+
+    /// Saves the document as a PDF at `out` (Word only ever changes its own copy)
+    static func toPDF(_ src: URL, options: Options, to out: URL) throws {
         guard isInstalled else { throw ConvError(tr("Microsoft Word is needed for this")) }
         guard !stuck else { throw ConvError(tr("Not converted: Word wasn't responding")) }
         let fm = FileManager.default
@@ -69,14 +106,12 @@ enum WordOps {
             try fm.copyItem(at: src, to: copy)
         } catch { throw ConvError(tr("File can't be read")) }
 
-        let (ok, output) = runScript([copy.path, tmp.path], timeout: 180)
+        let (ok, output) = runScript([copy.path, tmp.path, options.final ? "1" : "0", options.updateFields ? "1" : "0"], timeout: 300)
         guard ok, FileManager.default.fileExists(atPath: tmp.path) else {
             if output == "TIMEOUT" || output.contains("NOT_OPENED") || output.contains("-1712") { stuck = true }
             throw ConvError(message(for: output))
         }
-        let out = uniqueURL(folder ?? src.deletingLastPathComponent(), name, "pdf")
         do { try FileManager.default.moveItem(at: tmp, to: out) } catch { throw ConvError(tr("Can't write to destination")) }
-        return out
     }
 
     /// Quits Word if it has no documents open (used when Word was only started for the conversion)

@@ -46,14 +46,24 @@ enum Steps {
             return Outcome(message: out.lastPathComponent, files: [out])
         case .extractImages:
             let (dir, n) = try PDFImages.extract(job.url, pages: job.pages, skipSmall: s.skipSmallImages, folder: folder) {
-                progress("Page \($0) of \(job.pages.count)…")
+                progress(tr("Page %d of %d…", $0, job.pages.count))
             }
-            return Outcome(message: "\(n) image\(n == 1 ? "" : "s") in “\(dir.lastPathComponent)”", files: [dir])
+            return Outcome(message: n == 1 ? tr("1 image in “%@”", dir.lastPathComponent) : tr("%d images in “%@”", n, dir.lastPathComponent), files: [dir])
         case .wordToPDF:
             progress(tr("Word is creating the PDF…"))
-            let out = try WordOps.toPDF(job.url, name: job.outName ?? job.url.deletingPathExtension().lastPathComponent, folder: folder)
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("pdf")
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            try WordOps.toPDF(job.url, options: WordOps.Options(final: s.wordFinal, updateFields: s.wordUpdateFields), to: tmp)
+            if s.wordCompress {
+                progress(tr("Compressing…"))
+                _ = try Compressor.shrinkPDF(tmp, level: s.wordLevel)
+            }
+            let out = uniqueURL(folder ?? job.url.deletingLastPathComponent(), job.outName ?? job.url.deletingPathExtension().lastPathComponent, "pdf")
+            do { try FileManager.default.moveItem(at: tmp, to: out) } catch { throw ConvError(tr("Can't write to destination")) }
+            showExtension(out)
             let pages = PDFDocument(url: out)?.pageCount ?? 0
-            return Outcome(message: out.lastPathComponent + " · " + (pages == 1 ? tr("1 page") : tr("%d pages", pages)), files: [out])
+            return Outcome(message: [out.lastPathComponent, pages == 1 ? tr("1 page") : tr("%d pages", pages), fmtSize(fileSize(out))]
+                .joined(separator: " · "), files: [out])
         case .crop:
             let (out, w, h) = try PhotoOps.crop(job.url, aspect: s.cropAspect, folder: folder)
             return Outcome(message: "\(w)×\(h)", files: [out])

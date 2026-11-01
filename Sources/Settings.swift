@@ -19,13 +19,14 @@ struct ToolSettings: Codable, Sendable, Equatable {
     var splitMode: SplitMode = .extract
     var chunkSize: Int = 5
     var skipSmallImages: Bool = true
-    var wordNaming: WordNaming = .keep
-    var wordPrefix: String = ""
-    var wordSuffix: String = ""
-    var wordPattern: String = tr("Document ###")
-    var wordStart: Int = 1
-    var renamePattern: String = tr("Photo ###")
-    var renameStart: Int = 1
+    var wordRule = NameRule(mode: .keep, pattern: tr("Document ###"))
+    var wordFinal: Bool = true
+    var wordUpdateFields: Bool = true
+    var wordCombine: Bool = false
+    var wordCombinedName: String = tr("Combined")
+    var wordCompress: Bool = false
+    var wordLevel: Level = .balanced
+    var renameRule = NameRule(mode: .numbered, pattern: tr("Photo ###"))
     var cropAspect: CropAspect = .square
     var bgFill: BackgroundFill = .transparent
     var cropToSubject: Bool = false
@@ -59,7 +60,7 @@ struct ToolSettings: Codable, Sendable, Equatable {
     var csvSeparator: CSVSeparator = .semicolon
     var gifWidth: Int = 480
     var gifFPS: Int = 10
-    var renameMode: RenameMode = .numbered
+    var renameMode: RenameMode = .rule
 
     init() {}
 
@@ -85,13 +86,14 @@ struct ToolSettings: Codable, Sendable, Equatable {
         get(.splitMode, &splitMode)
         get(.chunkSize, &chunkSize)
         get(.skipSmallImages, &skipSmallImages)
-        get(.wordNaming, &wordNaming)
-        get(.wordPrefix, &wordPrefix)
-        get(.wordSuffix, &wordSuffix)
-        get(.wordPattern, &wordPattern)
-        get(.wordStart, &wordStart)
-        get(.renamePattern, &renamePattern)
-        get(.renameStart, &renameStart)
+        get(.wordRule, &wordRule)
+        get(.wordFinal, &wordFinal)
+        get(.wordUpdateFields, &wordUpdateFields)
+        get(.wordCombine, &wordCombine)
+        get(.wordCombinedName, &wordCombinedName)
+        get(.wordCompress, &wordCompress)
+        get(.wordLevel, &wordLevel)
+        get(.renameRule, &renameRule)
         get(.cropAspect, &cropAspect)
         get(.bgFill, &bgFill)
         get(.cropToSubject, &cropToSubject)
@@ -126,6 +128,24 @@ struct ToolSettings: Codable, Sendable, Equatable {
         get(.gifWidth, &gifWidth)
         get(.gifFPS, &gifFPS)
         get(.renameMode, &renameMode)
+        migrateNaming(decoder)
+    }
+
+    /// Settings saved before `NameRule` kept Word and Rename names in separate fields
+    private mutating func migrateNaming(_ decoder: Decoder) {
+        enum Old: String, CodingKey { case wordRule, renameRule, wordNaming, wordPrefix, wordSuffix, wordPattern, wordStart, renamePattern, renameStart }
+        guard let c = try? decoder.container(keyedBy: Old.self) else { return }
+        if !c.contains(.wordRule), let naming = try? c.decode(String.self, forKey: .wordNaming) {
+            wordRule.mode = ["Add text": .add, "Numbered": .numbered][naming] ?? .keep
+            if let x = try? c.decode(String.self, forKey: .wordPrefix) { wordRule.before = x }
+            if let x = try? c.decode(String.self, forKey: .wordSuffix) { wordRule.after = x }
+            if let x = try? c.decode(String.self, forKey: .wordPattern) { wordRule.pattern = x }
+            if let x = try? c.decode(Int.self, forKey: .wordStart) { wordRule.start = x }
+        }
+        if !c.contains(.renameRule) {
+            if let x = try? c.decode(String.self, forKey: .renamePattern) { renameRule.pattern = x }
+            if let x = try? c.decode(Int.self, forKey: .renameStart) { renameRule.start = x }
+        }
     }
 }
 

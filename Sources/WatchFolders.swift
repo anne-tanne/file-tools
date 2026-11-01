@@ -194,7 +194,7 @@ struct WatchFoldersSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("Watch Folders", systemImage: "folder.badge.gearshape").font(.headline)
+            Label(tr("Watch Folders"), systemImage: "folder.badge.gearshape").font(.headline)
 
             List {
                 ForEach($watcher.folders) { $f in
@@ -203,44 +203,44 @@ struct WatchFoldersSheet: View {
                             .lineLimit(1)
                             .frame(width: 150, alignment: .leading)
                             .help(f.url.path)
-                        Picker("Preset", selection: $f.presetID) {
+                        Picker(tr("Preset"), selection: $f.presetID) {
                             if !m.presets.contains(where: { $0.id == f.presetID }) {
-                                Text("Preset was deleted").tag(f.presetID)
+                                Text(tr("Preset was deleted")).tag(f.presetID)
                             }
                             ForEach(m.presets) { p in Text(p.name).tag(p.id) }
                         }
                         .labelsHidden()
                         .frame(width: 160)
-                        Toggle("Watch", isOn: $f.enabled).labelsHidden()
+                        Toggle(tr("Watch"), isOn: $f.enabled).labelsHidden()
                         Text(watcher.status[f.id] ?? "")
                             .font(.caption).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Button { watcher.folders.removeAll { $0.id == f.id } } label: {
-                            Label("Stop Watching", systemImage: "minus.circle.fill")
+                            Label(tr("Stop Watching"), systemImage: "minus.circle.fill")
                         }
                         .labelStyle(.iconOnly).buttonStyle(.borderless).foregroundStyle(.secondary)
-                        .help("Stop watching this folder")
+                        .help(tr("Stop watching this folder"))
                     }
                 }
             }
             .frame(minHeight: 150, idealHeight: 190)
             .overlay {
                 if watcher.folders.isEmpty {
-                    ContentUnavailableView("No Watched Folders", systemImage: "folder.badge.gearshape",
-                                           description: Text("Add a folder and choose a preset to run on every new file."))
+                    ContentUnavailableView(tr("No Watched Folders"), systemImage: "folder.badge.gearshape",
+                                           description: Text(tr("Add a folder and choose a preset to run on every new file.")))
                 }
             }
 
-            Text("Works while File Tools is open. Results go into a “Processed” folder inside the watched folder. Files already in the folder are left alone.")
+            Text(tr("Works while File Tools is open. Results go into a “Processed” folder inside the watched folder. Files already in the folder are left alone."))
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack {
-                Button { watcher.addFolder() } label: { Label("Add Folder…", systemImage: "plus") }
+                Button { watcher.addFolder() } label: { Label(tr("Add Folder…"), systemImage: "plus") }
                     .disabled(m.presets.isEmpty)
                 Spacer()
-                Button("Done") { dismiss() }
+                Button(tr("Done")) { dismiss() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
             }

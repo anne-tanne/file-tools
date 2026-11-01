@@ -56,4 +56,15 @@ enum Compressor {
         try fm.moveItem(at: b.url, to: out)
         return out
     }
+
+    /// Recompresses a PDF in place if that saves at least 5 %; returns whether it did
+    static func shrinkPDF(_ url: URL, level: Level) throws -> Bool {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("pdf")
+        defer { try? fm.removeItem(at: tmp) }
+        try PDFOps.compress(url, dpi: level.pdfDPI, quality: level.quality, to: tmp)
+        guard Double(fileSize(tmp)) <= Double(fileSize(url)) * 0.95 else { return false }
+        _ = try fm.replaceItemAt(url, withItemAt: tmp)
+        return true
+    }
 }

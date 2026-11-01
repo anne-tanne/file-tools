@@ -9,7 +9,7 @@ extension Model {
     func serviceRun(_ tool: Tool, _ urls: [URL]) {
         if busy { add(urls); return }
         self.tool = tool
-        clearList()
+        clearList(undo: nil)
         add(urls)
         run()
     }
