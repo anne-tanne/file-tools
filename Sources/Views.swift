@@ -491,7 +491,8 @@ struct NameRuleEditor<Extra: View>: View {
     /// One or two short lines (a long line gets cut off at the minimum window width)
     var hint: [String] {
         if isSmart {
-            return [tr("Names like 261014-SwisscomInvoice.pdf, from each file's date and content. Click Suggest Names, check them, then Rename.")]
+            let main = tr("Names like 261014-SwisscomInvoice.pdf, from each file's date and content. Click Suggest Names, check them, then Rename.")
+            return SmartName.usesAppleIntelligence ? [main, tr("Uses Apple Intelligence on this Mac.")] : [main]
         }
         let stem = example?.deletingPathExtension().lastPathComponent ?? tr("Report")
         let ext = example.map { $0.pathExtension.isEmpty ? "" : "." + $0.pathExtension } ?? ""

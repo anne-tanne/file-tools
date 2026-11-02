@@ -713,6 +713,7 @@ enum L10n {
         "Names like 261014-SwisscomInvoice.pdf, from each file's date and content. Click Suggest Names, check them, then Rename.":
             ("Namen wie 261014-SwisscomRechnung.pdf, aus Datum und Inhalt jeder Datei. Namen vorschlagen, prüfen, dann umbenennen.",
              "Noms comme 261014-FactureSwisscom.pdf, d’après la date et le contenu. Proposez des noms, vérifiez-les, puis renommez."),
+        "Uses Apple Intelligence on this Mac.": ("Verwendet Apple Intelligence auf diesem Mac.", "Utilise Apple Intelligence sur ce Mac."),
         "Photos are put together in list order. Drag to reorder or use Sort. They are scaled to the same width (or height), never enlarged.":
             ("Fotos werden in der Reihenfolge der Liste zusammengefügt. Zum Ändern ziehen oder «Sortieren» verwenden. Sie werden auf gleiche Breite (oder Höhe) gebracht, nie vergrössert.",
              "Les photos sont assemblées dans l’ordre de la liste. Faites glisser pour réordonner ou utilisez Trier. Elles sont mises à la même largeur (ou hauteur), jamais agrandies."),

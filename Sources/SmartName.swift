@@ -1,10 +1,14 @@
 import AppKit
+import FoundationModels
 import PDFKit
 import Vision
 
 /// Suggests a file name like "261014-SwisscomInvoice" (yyMMdd-TitleInCamelCase) from a file's content.
 /// Sender and document type from the text (or scene labels for photos), date from the text or the file.
 enum SmartName {
+    /// Apple Intelligence is on and its model is ready. Otherwise names come from the heuristic only.
+    static var usesAppleIntelligence: Bool { SystemLanguageModel.default.availability == .available }
+
     /// File name stem without extension, e.g. "261014-SwisscomInvoice". `fallbackDate` = photo date or file creation date.
     static func suggest(_ url: URL, kind: Kind, fallbackDate: Date) throws -> String {
         var text = String(try content(url, kind: kind).prefix(1500))
@@ -13,8 +17,11 @@ enum SmartName {
             if kind == .image { description = try labels(url).joined(separator: ", ") }
             text = ""
         }
-        let date = firstDate(in: text) ?? fallbackDate
-        let title = heuristicTitle(text: text, description: description)
+        // Apple Intelligence when on (falls back to the heuristic on any model error)
+        let guess = usesAppleIntelligence && !(text.isEmpty && description.isEmpty)
+            ? try? modelGuess(text: text, description: description) : nil
+        let date = guess?.date ?? firstDate(in: text) ?? fallbackDate
+        let title = guess?.title ?? heuristicTitle(text: text, description: description)
         var name = camelCase(title)
         if name.isEmpty { name = camelCase(url.deletingPathExtension().lastPathComponent) }
         if name.isEmpty { name = tr("Document") }
@@ -61,6 +68,70 @@ enum SmartName {
             .map { $0.identifier.replacingOccurrences(of: "_", with: " ") }
     }
 
+    // MARK: Apple Intelligence
+
+    /// Answer shape for the model: {date, sender, type}. Built by hand because the @Generable macro needs Xcode.
+    private static let schema: GenerationSchema? = try? GenerationSchema(root: DynamicGenerationSchema(name: "Guess", properties: [
+        .init(name: "date", description: "The document's own date (invoice date, letter date, meeting date) as YYYY-MM-DD, or an empty string",
+              schema: DynamicGenerationSchema(type: String.self)),
+        .init(name: "sender", description: "Who wrote or sent it (company, organisation or person), copied exactly from the file, or an empty string",
+              schema: DynamicGenerationSchema(type: String.self)),
+        .init(name: "type", description: "What kind of document it is, in 1 or 2 words (invoice, receipt, minutes, letter, contract, …)",
+              schema: DynamicGenerationSchema(type: String.self)),
+    ]), dependencies: [])
+
+    /// Date and title from the on-device model. The small model makes things up, so its answer only counts
+    /// where the file backs it: the date must be one of the file's dates, the sender's words must be in the file.
+    /// nil parts: use the heuristic for that part.
+    private static func modelGuess(text: String, description: String) throws -> (date: Date?, title: String?) {
+        let language = switch L10n.lang { case .en: "English"; case .de: "German (Swiss spelling, ss instead of ß)"; case .fr: "French" }
+        let instructions = """
+            You help name files. Read the content of one file and say when it was written, who sent it and what kind \
+            of document it is. Write the kind of document in \(language). Copy names exactly as written, never translate them.
+            """
+        let prompt = text.isEmpty ? "A photo showing: \(description)" : "Text of the file:\n\(text)"
+        guard let schema else { throw ConvError("No schema") }
+        let guess = try waitFor {
+            let c = try await LanguageModelSession(instructions: instructions).respond(to: prompt, schema: schema).content
+            return (date: try c.value(String.self, forProperty: "date"), sender: try c.value(String.self, forProperty: "sender"),
+                    type: try c.value(String.self, forProperty: "type"))
+        }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        let date = f.date(from: guess.date.trimmingCharacters(in: .whitespaces)).flatMap { d in
+            allDates(in: text).contains { Calendar.current.isDate($0, inSameDayAs: d) } ? d : nil
+        }
+        let source = (text + " " + description).lowercased()
+        let senderText = guess.sender.replacingOccurrences(of: "\\([^)]*\\)", with: " ", options: .regularExpression)
+        let sender = Array(words(senderText).filter { !legalForms.contains($0.lowercased()) && !honorifics.contains($0.lowercased()) }.prefix(3))
+        guard !sender.isEmpty, sender.allSatisfy({ source.contains($0.lowercased()) }) else { return (date, nil) }
+        var title = sender
+        if let type = documentType(guess.type, source: source), !sender.contains(where: { $0.lowercased() == type.lowercased() }) {
+            title.append(type)
+        }
+        return (date, title.joined(separator: " "))
+    }
+
+    /// The model's document type, only if the file backs it: a known type (as the interface language's word)
+    /// whose keyword is in the file, or words that are themselves in the file
+    private static func documentType(_ guess: String, source: String) -> String? {
+        let w = words(guess).prefix(2)
+        guard !w.isEmpty else { return nil }
+        if let i = w.lazy.compactMap({ typeKeywords[$0.lowercased()] ?? typeAliases[$0.lowercased()] }).first {
+            guard typeKeywords.contains(where: { $0.value == i && source.contains($0.key) }) else { return nil }
+            return typeWord(i)
+        }
+        return w.allSatisfy { source.contains($0.lowercased()) } ? w.joined(separator: " ") : nil
+    }
+
+    private static let honorifics: Set<String> = ["dr", "med", "prof", "herr", "frau", "mr", "mrs", "ms", "mme", "monsieur", "madame"]
+
+    /// Words of at least 2 letters, without numbers (dates, amounts)
+    private static func words(_ s: String) -> [String] {
+        s.split(whereSeparator: { !$0.isLetter && $0 != "-" }).map(String.init).filter { $0.filter(\.isLetter).count >= 2 }
+    }
+
     // MARK: Heuristic
 
     private static let legalForms: Set<String> = ["ag", "gmbh", "sa", "sàrl", "sarl", "ltd", "inc", "llc", "kg"]
@@ -74,13 +145,22 @@ enum SmartName {
         "mahnung": 4, "reminder": 4, "rappel": 4,
         "kontoauszug": 5, "statement": 5, "relevé": 5,
         "zeugnis": 6, "bestätigung": 6, "certificate": 6, "attestation": 6, "certificat": 6,
+        "protokoll": 7, "procès-verbal": 7,
+        "letter": 8, "lettre": 8,
     ]
+    /// More words the model uses for a type; too common in running text to be keywords themselves
+    private static let typeAliases: [String: Int] = ["minutes": 7, "brief": 8]
     /// Output words per type: en, de, fr
     private static let typeWords: [(en: String, de: String, fr: String)] = [
         ("Invoice", "Rechnung", "Facture"), ("Receipt", "Quittung", "Reçu"), ("Contract", "Vertrag", "Contrat"),
         ("Offer", "Offerte", "Offre"), ("Reminder", "Mahnung", "Rappel"), ("Statement", "Kontoauszug", "Relevé"),
-        ("Certificate", "Bestätigung", "Attestation"),
+        ("Certificate", "Bestätigung", "Attestation"), ("Minutes", "Protokoll", "ProcèsVerbal"), ("Letter", "Brief", "Lettre"),
     ]
+
+    private static func typeWord(_ i: Int) -> String {
+        let t = typeWords[i]
+        return switch L10n.lang { case .en: t.en; case .de: t.de; case .fr: t.fr }
+    }
 
     /// Sender (first line, without legal forms and bracketed parts, max 2 words) plus the document type
     private static func heuristicTitle(text: String, description: String) -> String {
@@ -100,8 +180,7 @@ enum SmartName {
         let found = text.split(whereSeparator: { !$0.isLetter }).lazy
             .compactMap { typeKeywords[$0.lowercased()] }.first
         if let i = found {
-            let t = typeWords[i]
-            let word = switch L10n.lang { case .en: t.en; case .de: t.de; case .fr: t.fr }
+            let word = typeWord(i)
             let lower = title.lowercased()
             let present = lower.contains(word.lowercased())
                 || typeKeywords.contains { $0.value == i && lower.contains($0.key) }
@@ -110,13 +189,12 @@ enum SmartName {
         return title
     }
 
-    private static func firstDate(in text: String) -> Date? {
-        guard !text.isEmpty, let det = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) else { return nil }
-        let range = NSRange(text.startIndex..., in: text)
-        for m in det.matches(in: text, range: range) {
-            if let d = m.date, inRange(d) { return d }
-        }
-        return nil
+    private static func firstDate(in text: String) -> Date? { allDates(in: text).first }
+
+    /// Dates found in the text (year 1990…next year), in text order
+    private static func allDates(in text: String) -> [Date] {
+        guard !text.isEmpty, let det = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) else { return [] }
+        return det.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap(\.date).filter(inRange)
     }
 
     // MARK: Helpers
