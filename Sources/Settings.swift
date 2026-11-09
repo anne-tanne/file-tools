@@ -26,6 +26,9 @@ struct ToolSettings: Codable, Sendable, Equatable {
     var wordCombinedName: String = tr("Combined")
     var wordCompress: Bool = false
     var wordLevel: Level = .balanced
+    var wordMerge: MergeOutput = .each
+    var wordMergeName: String = ""
+    var wordMergeDocx: Bool = false
     var renameRule = NameRule(mode: .numbered, pattern: tr("Photo ###"))
     var cropAspect: CropAspect = .square
     var bgFill: BackgroundFill = .transparent
@@ -93,6 +96,9 @@ struct ToolSettings: Codable, Sendable, Equatable {
         get(.wordCombinedName, &wordCombinedName)
         get(.wordCompress, &wordCompress)
         get(.wordLevel, &wordLevel)
+        get(.wordMerge, &wordMerge)
+        get(.wordMergeName, &wordMergeName)
+        get(.wordMergeDocx, &wordMergeDocx)
         get(.renameRule, &renameRule)
         get(.cropAspect, &cropAspect)
         get(.bgFill, &bgFill)

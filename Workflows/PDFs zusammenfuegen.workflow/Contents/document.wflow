@@ -1,0 +1,363 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>AMApplicationBuild</key>
+	<string>534</string>
+	<key>AMApplicationVersion</key>
+	<string>2.10</string>
+	<key>AMDocumentVersion</key>
+	<string>2</string>
+	<key>actions</key>
+	<array>
+		<dict>
+			<key>action</key>
+			<dict>
+				<key>AMAccepts</key>
+				<dict>
+					<key>Container</key>
+					<string>List</string>
+					<key>Optional</key>
+					<true/>
+					<key>Types</key>
+					<array>
+						<string>com.apple.cocoa.string</string>
+					</array>
+				</dict>
+				<key>AMActionVersion</key>
+				<string>2.0.3</string>
+				<key>AMApplication</key>
+				<array>
+					<string>Automator</string>
+				</array>
+				<key>AMParameterProperties</key>
+				<dict>
+					<key>COMMAND_STRING</key>
+					<dict/>
+					<key>CheckedForUserDefaultShell</key>
+					<dict/>
+					<key>inputMethod</key>
+					<dict/>
+					<key>shell</key>
+					<dict/>
+					<key>source</key>
+					<dict/>
+				</dict>
+				<key>AMProvides</key>
+				<dict>
+					<key>Container</key>
+					<string>List</string>
+					<key>Types</key>
+					<array>
+						<string>com.apple.cocoa.string</string>
+					</array>
+				</dict>
+				<key>ActionBundlePath</key>
+				<string>/System/Library/Automator/Run Shell Script.action</string>
+				<key>ActionName</key>
+				<string>Run Shell Script</string>
+				<key>ActionParameters</key>
+				<dict>
+					<key>COMMAND_STRING</key>
+					<string>#!/bin/zsh
+# PDFs zusammenfügen: Finder Quick Action. The selected PDFs and images, or those directly inside a selected
+# folder, become one PDF in that same folder, in Finder order (numbers sorted as numbers). Images are put
+# in the middle of a white A4 page (landscape for landscape images), shrunk to fit, never enlarged.
+# The name is asked for, suggested as today's date + the folder's name, e.g. "261102-Kreditkarte".
+# PDFs made by this action are marked and left out the next time, so it can run again on the same folder.
+# Arguments: files and folders. For testing from the shell, PDFS_NAME (the full name) skips the dialog.
+# make_workflows.sh turns this file into "PDFs zusammenfuegen.workflow".
+
+setopt extended_glob null_glob
+
+TITLE="PDFs zusammenfügen"
+MARK=ch.akademien.pdfs-zusammenfuegen   # extended attribute on the PDFs this action made
+TYPES='(#i)(pdf|jpg|jpeg|png|heic|heif|tif|tiff|gif|bmp|webp)'
+
+alert() {   # alert "message" ["detail"]
+    osascript - "$1" "${2:-}" &lt;&lt;'EOF' &gt;/dev/null 2&gt;&amp;1
+on run argv
+    display alert (item 1 of argv) message (item 2 of argv) as informational
+end run
+EOF
+}
+
+notify() {
+    osascript - "$TITLE" "$1" &lt;&lt;'EOF' &gt;/dev/null 2&gt;&amp;1
+on run argv
+    display notification (item 2 of argv) with title (item 1 of argv)
+end run
+EOF
+}
+
+files=()
+for p in "$@"; do
+    if [[ -d $p ]]; then
+        files+=( "$p"/*.${~TYPES}(.) )
+    elif [[ $p == *.${~TYPES} ]]; then
+        files+=( "$p" )
+    fi
+done
+files=( ${(u)files} )
+files=( ${(oin)files} )
+kept=()
+for f in $files; do xattr -p $MARK "$f" &gt;/dev/null 2&gt;&amp;1 || kept+=( "$f" ); done
+files=( $kept )
+
+if (( ${#files} == 0 )); then
+    alert "Keine PDFs oder Bilder gefunden" "Markiere PDFs und Bilder oder einen Ordner, der welche enthält."
+    exit 0
+fi
+
+# The new PDF goes into the folder the files are in (the selected folder, or the first file's)
+if (( $# == 1 )) &amp;&amp; [[ -d $1 ]]; then
+    folder=${1:A}
+else
+    folder=${files[1]:h}
+fi
+
+# Name: today's date + the folder's name
+today=$(date +%y%m%d)
+if [[ -n ${PDFS_NAME+set} ]]; then
+    name=$PDFS_NAME
+else
+    name=$(osascript - "${#files}" "$today-${folder:t}" &lt;&lt;'EOF' 2&gt;/dev/null
+on run argv
+    set r to display dialog ((item 1 of argv) &amp; " Dateien zu einem PDF zusammenfügen. Name des neuen PDFs:") default answer (item 2 of argv) with title "PDFs zusammenfügen" buttons {"Abbrechen", "Zusammenfügen"} default button "Zusammenfügen" cancel button "Abbrechen"
+    return text returned of r
+end run
+EOF
+    ) || exit 0
+fi
+name=${name//[\/:]/-}
+name=${${name##[[:space:]]#}%%[[:space:]]#}
+name=${name%.(#i)pdf}
+[[ -z $name ]] &amp;&amp; name="$today-${folder:t}"
+
+out="$folder/$name.pdf"
+n=1
+while [[ -e $out ]]; do out="$folder/$name ($n).pdf"; (( n++ )); done
+
+# PDFKit (JavaScript for Automation): prints the pages written, then one line per file that was left out.
+# Errors go to a file of their own, PDFKit also logs warnings there for damaged files
+errors=$(mktemp)
+result=$(osascript -l JavaScript - "$out" $files &lt;&lt;'EOF' 2&gt;"$errors"
+ObjC.import('AppKit')
+ObjC.import('PDFKit')
+
+// Image in the middle of a white A4 page with 1 cm margin, shrunk to fit, never enlarged
+function imagePage(img) {
+    const landscape = img.size.width &gt; img.size.height
+    const W = landscape ? 842 : 595, H = landscape ? 595 : 842, m = 28
+    const scale = Math.min(1, (W - 2 * m) / img.size.width, (H - 2 * m) / img.size.height)
+    const w = img.size.width * scale, h = img.size.height * scale
+    const opts = $.NSMutableDictionary.alloc.init
+    opts.setObjectForKey($.NSValue.valueWithRect($.NSMakeRect(0, 0, w, h)), 'PDFPageImageInitializationOptionMediaBox')
+    opts.setObjectForKey($.NSNumber.numberWithDouble(0.9), 'PDFPageImageInitializationOptionCompressionQuality')
+    const page = $.PDFPage.alloc.initWithImageOptions(img, opts)
+    if (page.isNil()) return page
+    // Grow the page around the image: media box and crop box
+    const x = (W - w) / 2, y = (H - h) / 2
+    for (const box of [0, 1]) page.setBoundsForBox($.NSMakeRect(-x, -y, W, H), box)
+    return page
+}
+
+function run(argv) {
+    const out = $.PDFDocument.alloc.init
+    const skipped = []
+    for (const p of argv.slice(1)) {
+        const file = p.split('/').pop()
+        if (/\.pdf$/i.test(p)) {
+            const doc = $.PDFDocument.alloc.initWithURL($.NSURL.fileURLWithPath(p))
+            if (doc.isNil()) { skipped.push(file + ' (kann nicht gelesen werden)'); continue }
+            if (doc.isLocked) { skipped.push(file + ' (mit Passwort geschützt)'); continue }
+            for (let i = 0; i &lt; doc.pageCount; i++) out.insertPageAtIndex(doc.pageAtIndex(i), out.pageCount)
+        } else {
+            const img = $.NSImage.alloc.initWithContentsOfFile(p)
+            const page = img.isNil() || img.size.width === 0 ? $() : imagePage(img)
+            if (page.isNil()) { skipped.push(file + ' (Bild kann nicht gelesen werden)'); continue }
+            out.insertPageAtIndex(page, out.pageCount)
+        }
+    }
+    if (out.pageCount === 0) return ['0'].concat(skipped).join('\n')
+    if (!out.writeToURL($.NSURL.fileURLWithPath(argv[0]))) return 'WRITE_FAILED'
+    return [String(out.pageCount)].concat(skipped).join('\n')
+}
+EOF
+)
+error_text=$(&lt;"$errors"); rm -f "$errors"
+pages=${result%%$'\n'*}
+skipped=( ${(f)${result#$pages}} )
+
+if [[ $pages != &lt;1-&gt; || ! -f $out ]]; then
+    [[ $pages == 0 ]] &amp;&amp; detail="Keine der Dateien konnte gelesen werden:
+${(F)skipped}" || detail="$result
+${error_text##*execution error: }"
+    alert "Das PDF konnte nicht erstellt werden" "$detail"
+    exit 1
+fi
+xattr -w $MARK 1 "$out"
+open -R "$out"
+if (( ${#skipped} )); then
+    alert "${out:t} erstellt, aber nicht vollständig" "Diese Dateien fehlen:
+${(F)skipped}"
+else
+    notify "«${out:t}» erstellt: ${#files} Dateien, $pages Seiten."
+fi</string>
+					<key>CheckedForUserDefaultShell</key>
+					<true/>
+					<key>inputMethod</key>
+					<integer>1</integer>
+					<key>shell</key>
+					<string>/bin/zsh</string>
+					<key>source</key>
+					<string></string>
+				</dict>
+				<key>BundleIdentifier</key>
+				<string>com.apple.RunShellScript</string>
+				<key>CFBundleVersion</key>
+				<string>2.0.3</string>
+				<key>CanShowSelectedItemsWhenRun</key>
+				<false/>
+				<key>CanShowWhenRun</key>
+				<true/>
+				<key>Category</key>
+				<array>
+					<string>AMCategoryUtilities</string>
+				</array>
+				<key>Class Name</key>
+				<string>RunShellScriptAction</string>
+				<key>InputUUID</key>
+				<string>1E5F62F5-275B-47E7-A6B4-C447272618E5</string>
+				<key>Keywords</key>
+				<array>
+					<string>Shell</string>
+					<string>Script</string>
+					<string>Command</string>
+					<string>Run</string>
+					<string>Unix</string>
+				</array>
+				<key>OutputUUID</key>
+				<string>04C32D78-5A07-4423-80A1-D13332FC2B88</string>
+				<key>UUID</key>
+				<string>C8CD3F3F-BC06-4C13-BAEC-A3CFCD2CC7A2</string>
+				<key>UnlocalizedApplications</key>
+				<array>
+					<string>Automator</string>
+				</array>
+				<key>arguments</key>
+				<dict>
+					<key>0</key>
+					<dict>
+						<key>default value</key>
+						<integer>0</integer>
+						<key>name</key>
+						<string>inputMethod</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>0</string>
+					</dict>
+					<key>1</key>
+					<dict>
+						<key>default value</key>
+						<false/>
+						<key>name</key>
+						<string>CheckedForUserDefaultShell</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>1</string>
+					</dict>
+					<key>2</key>
+					<dict>
+						<key>default value</key>
+						<string></string>
+						<key>name</key>
+						<string>source</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>2</string>
+					</dict>
+					<key>3</key>
+					<dict>
+						<key>default value</key>
+						<string></string>
+						<key>name</key>
+						<string>COMMAND_STRING</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>3</string>
+					</dict>
+					<key>4</key>
+					<dict>
+						<key>default value</key>
+						<string>/bin/sh</string>
+						<key>name</key>
+						<string>shell</string>
+						<key>required</key>
+						<string>0</string>
+						<key>type</key>
+						<string>0</string>
+						<key>uuid</key>
+						<string>4</string>
+					</dict>
+				</dict>
+				<key>conversionLabel</key>
+				<integer>0</integer>
+				<key>isViewVisible</key>
+				<integer>1</integer>
+				<key>location</key>
+				<string>309.000000:305.000000</string>
+				<key>nibPath</key>
+				<string>/System/Library/Automator/Run Shell Script.action/Contents/Resources/Base.lproj/main.nib</string>
+			</dict>
+			<key>isViewVisible</key>
+			<integer>1</integer>
+		</dict>
+	</array>
+	<key>connectors</key>
+	<dict/>
+	<key>workflowMetaData</key>
+	<dict>
+		<key>applicationBundleIDsByPath</key>
+		<dict/>
+		<key>applicationPaths</key>
+		<array/>
+		<key>inputTypeIdentifier</key>
+		<string>com.apple.Automator.fileSystemObject</string>
+		<key>outputTypeIdentifier</key>
+		<string>com.apple.Automator.nothing</string>
+		<key>presentationMode</key>
+		<integer>15</integer>
+		<key>processesInput</key>
+		<false/>
+		<key>serviceApplicationBundleID</key>
+		<string>com.apple.finder</string>
+		<key>serviceApplicationPath</key>
+		<string>/System/Library/CoreServices/Finder.app</string>
+		<key>serviceInputTypeIdentifier</key>
+		<string>com.apple.Automator.fileSystemObject</string>
+		<key>serviceOutputTypeIdentifier</key>
+		<string>com.apple.Automator.nothing</string>
+		<key>serviceProcessesInput</key>
+		<false/>
+		<key>systemImageName</key>
+		<string>NSActionTemplate</string>
+		<key>useAutomaticInputType</key>
+		<false/>
+		<key>workflowTypeIdentifier</key>
+		<string>com.apple.Automator.servicesMenu</string>
+	</dict>
+</dict>
+</plist>

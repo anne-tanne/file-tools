@@ -143,6 +143,7 @@ struct Item: Identifiable {
     var output: URL? = nil           // compressed copy, for comparing
     var results: [URL] = []          // files (or folders) the last successful run made, for dragging and Quick Look
     var order: [Int]? = nil          // Reorder: original 0-based pages in their new order; nil = unchanged
+    var merge: WordOps.MergeInfo? = nil   // Word: a Serienbrief, merged with its address list
 
     var pages: [Int] { selected.isEmpty ? Array(0..<pageCount) : selected.sorted() }
     var pageSummary: String {
@@ -197,6 +198,7 @@ final class Model: ObservableObject {
         didSet { if persist { Preset.save(presets) } }
     }
     @Published var outputFolder: URL? = nil   // nil = next to the original
+    var combineTarget: (folder: URL, name: String)? = nil   // set once by the folder quick action
     @Published var busy = false
     @Published var focused: Item.ID? = nil   // PDF whose pages are shown below the list
     @Published var comparing: Item.ID? = nil
@@ -415,7 +417,8 @@ final class Model: ObservableObject {
                     items.append(Item(url: u, kind: .pdf, pageCount: max(1, doc.pageCount), date: Self.date(of: u, kind: .pdf)))
                 }
             } else {
-                items.append(Item(url: u, kind: kind, date: Self.date(of: u, kind: kind)))
+                items.append(Item(url: u, kind: kind, date: Self.date(of: u, kind: kind),
+                                  merge: kind == .word ? WordOps.mergeInfo(u) : nil))
             }
         }
     }
@@ -624,8 +627,10 @@ final class Model: ObservableObject {
     private func combine() {
         let parts = eligible
         guard !parts.isEmpty else { return }
-        let name = settings.combinedName.trimmingCharacters(in: .whitespaces).isEmpty ? tr("Combined") : settings.combinedName
-        let out = uniqueURL(outputFolder ?? parts[0].url.deletingLastPathComponent(), name, "pdf")
+        var name = settings.combinedName.trimmingCharacters(in: .whitespaces).isEmpty ? tr("Combined") : settings.combinedName
+        var folder = outputFolder ?? parts[0].url.deletingLastPathComponent()
+        if let t = combineTarget { name = t.name; folder = outputFolder ?? t.folder; combineTarget = nil }
+        let out = uniqueURL(folder, withDate(name), "pdf")
         let entries = parts.map { (url: $0.url, kind: $0.kind) }
         let pageSize = settings.pageSize, margin = settings.pageMargin
         for p in parts { update(p.id) { $0.status = tr("Waiting…"); $0.done = false; $0.failed = false } }
@@ -827,7 +832,8 @@ final class Model: ObservableObject {
         let trimmed = settings.wordCombinedName.trimmingCharacters(in: .whitespaces)
         let name = trimmed.isEmpty ? tr("Combined") : trimmed
         let out = uniqueURL(outputFolder ?? docs[0].url.deletingLastPathComponent(), name, "pdf")
-        let jobs = docs.map { (id: $0.id, url: $0.url) }
+        let jobs = docs.map { (id: $0.id, url: $0.url, merge: $0.merge != nil) }
+        let s = settings
         for d in docs { update(d.id) { $0.status = tr("Waiting…"); $0.done = false; $0.failed = false } }
         busy = true
         runner = Task.detached {
@@ -841,7 +847,11 @@ final class Model: ObservableObject {
                     if Task.isCancelled { throw CancellationError() }
                     await MainActor.run { self.update(j.id) { $0.status = tr("Word is creating the PDF…") } }
                     let part = work.appendingPathComponent("\(n).pdf")
-                    do { try WordOps.toPDF(j.url, options: options, to: part) } catch {
+                    let progress: @Sendable (String) -> Void = { msg in Task { @MainActor in self.update(j.id) { $0.status = msg } } }
+                    do {
+                        if j.merge { try Steps.allLetters(j.url, s, to: part, progress: progress) }
+                        else { try WordOps.toPDF(j.url, options: options, to: part) }
+                    } catch {
                         await MainActor.run { self.update(j.id) { $0.status = tr("Error: ") + error.localizedDescription; $0.failed = true } }
                         // Say which file stopped the whole PDF
                         throw ConvError("\(j.url.lastPathComponent): \(error.localizedDescription)")
@@ -878,7 +888,16 @@ final class Model: ObservableObject {
         }
     }
 
-    /// PDF name (without .pdf) for every Word document, in list order
+    /// Serienbriefe in the list (they get their own settings)
+    var mergeItems: [Item] { eligible.filter { $0.merge != nil } }
+
+    /// Names shown in the list: the PDF, or the folder a Serienbrief's letters go into
+    func wordPreview() -> [Item.ID: String] {
+        let folders = settings.wordMerge == .each ? Set(mergeItems.filter { !$0.merge!.wholeList }.map(\.id)) : []
+        return wordPDFNames().reduce(into: [:]) { r, e in r[e.key] = folders.contains(e.key) ? tr("“%@” folder", e.value) : e.value + ".pdf" }
+    }
+
+    /// PDF name (without .pdf) for every Word document, in list order (for a Serienbrief: its PDF or folder)
     func wordPDFNames() -> [Item.ID: String] {
         let docs = eligible
         var result: [Item.ID: String] = [:]

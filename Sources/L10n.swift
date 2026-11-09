@@ -415,6 +415,7 @@ enum L10n {
         "Protect": ("Schützen", "Protéger"),
         "Unlock": ("Entsperren", "Déverrouiller"),
         "Trim borders": ("Ränder abschneiden", "Supprimer les bords"),
+        "Borders": ("Ränder", "Bords"),
         "Transparent": ("Transparent", "Transparent"),
         "White": ("Weiss", "Blanc"),
         "Text": ("Text", "Texte"),
@@ -781,6 +782,79 @@ enum L10n {
         "Stopped. The remaining files were not processed.":
             ("Gestoppt. Die übrigen Dateien wurden nicht bearbeitet.", "Arrêté. Les fichiers restants n’ont pas été traités."),
         "Stopped. No PDF was created.": ("Gestoppt. Es wurde kein PDF erstellt.", "Arrêté. Aucun PDF n’a été créé."),
+        // Combine quick action
+        "Name of the new PDF. yymmdd becomes today's date.":
+            ("Name des neuen PDFs. yymmdd wird zum heutigen Datum.", "Nom du nouveau PDF. yymmdd devient la date du jour."),
+        "yymmdd in the name becomes today's date, e.g. “yymmdd-Statement” → “%@.pdf”.":
+            ("yymmdd im Namen wird zum heutigen Datum, z. B. «yymmdd-Abrechnung» → «%@.pdf».",
+             "yymmdd dans le nom devient la date du jour, p. ex. « yymmdd-Relevé » → « %@.pdf »."),
+        "Statement": ("Abrechnung", "Relevé"),
+        // Mail merge
+        "Also as Word documents": ("Auch als Word-Dokumente", "Aussi en documents Word"),
+        "Saves each letter also as a Word document, e.g. to change one letter later. PDFs and Word documents go into the folders “PDF” and “Word”.":
+            ("Sichert jeden Brief auch als Word-Dokument, z. B. um einen einzelnen Brief später zu ändern. PDFs und Word-Dokumente kommen in die Ordner «PDF» und «Word».",
+             "Enregistre aussi chaque lettre en document Word, p. ex. pour modifier une lettre plus tard. Les PDF et les documents Word vont dans les dossiers « PDF » et « Word »."),
+        "Create PDFs from the mail merge": ("PDFs aus dem Serienbrief erstellen", "Créer les PDF du publipostage"),
+        "Fields in braces are filled in for each letter. Left empty, the letters are numbered.":
+            ("Felder in geschweiften Klammern werden für jeden Brief ausgefüllt. Leer gelassen, werden die Briefe nummeriert.",
+             "Les champs entre accolades sont remplis pour chaque lettre. Si le champ reste vide, les lettres sont numérotées."),
+        "Fields in this letter: %@": ("Felder in diesem Brief: %@", "Champs de cette lettre : %@"),
+        "Word is opening the letter…":
+            ("Word öffnet den Brief…", "Word ouvre la lettre…"),
+        "This is not a mail merge document":
+            ("Das ist kein Serienbrief", "Ce n’est pas un document de publipostage"),
+        "Recipients are filtered or unticked in this letter. File Tools can't apply that yet: remove the filter in Word (Sendungen › Empfängerliste bearbeiten) or make a list with only these recipients.":
+            ("In diesem Brief sind Empfänger gefiltert oder abgewählt. Das kann File Tools noch nicht übernehmen: Entfernen Sie den Filter in Word (Sendungen › Empfängerliste bearbeiten) oder erstellen Sie eine Liste nur mit diesen Empfängern.",
+             "Des destinataires sont filtrés ou décochés dans cette lettre. File Tools ne peut pas encore en tenir compte : supprimez le filtre dans Word (Publipostage › Modifier la liste de destinataires) ou créez une liste avec seulement ces destinataires."),
+        "File Tools can read address lists in Excel (.xlsx) or CSV. Save “%@” in one of these formats and connect it to the letter again.":
+            ("File Tools kann Adresslisten in Excel (.xlsx) oder CSV lesen. Sichern Sie «%@» in einem dieser Formate und verbinden Sie sie erneut mit dem Brief.",
+             "File Tools lit les listes d’adresses Excel (.xlsx) ou CSV. Enregistrez « %@ » dans l’un de ces formats et liez-la de nouveau à la lettre."),
+        "One PDF per letter":
+            ("Ein PDF pro Brief", "Un PDF par lettre"),
+        "All letters in one PDF":
+            ("Alle Briefe in einem PDF", "Toutes les lettres dans un PDF"),
+        "Mail merge":
+            ("Serienbrief", "Publipostage"),
+        "Bookmarks":
+            ("Lesezeichen", "Signets"),
+        "Letter":
+            ("Brief", "Lettre"),
+        "Insert Field":
+            ("Feld einfügen", "Insérer un champ"),
+        "1 letter":
+            ("1 Brief", "1 lettre"),
+        "%d letters":
+            ("%d Briefe", "%d lettres"),
+        "1 letter in “%@”":
+            ("1 Brief in «%@»", "1 lettre dans « %@ »"),
+        "%d letters in “%@”":
+            ("%d Briefe in «%@»", "%d lettres dans « %@ »"),
+        "“%@” folder":
+            ("Ordner «%@»", "dossier « %@ »"),
+        "Letter %d of %d…":
+            ("Brief %d von %d…", "Lettre %d sur %d…"),
+        "Compressing %d of %d…":
+            ("Wird komprimiert: %d von %d…", "Compression %d sur %d…"),
+        "No address list is connected to this mail merge document":
+            ("Mit diesem Serienbrief ist keine Adressliste verbunden", "Aucune liste d’adresses n’est liée à ce document de publipostage"),
+        "The address list “%@” wasn't found. Put it in the same folder as the letter.":
+            ("Die Adressliste «%@» wurde nicht gefunden. Legen Sie sie in denselben Ordner wie den Brief.", "La liste d’adresses « %@ » est introuvable. Placez-la dans le même dossier que la lettre."),
+        "Word couldn't read the address list “%@”.":
+            ("Word konnte die Adressliste «%@» nicht lesen.", "Word n’a pas pu lire la liste d’adresses « %@ »."),
+        "The address list “%@” has no entries.":
+            ("Die Adressliste «%@» enthält keine Einträge.", "La liste d’adresses « %@ » ne contient aucune entrée."),
+        "Stopped. No PDFs were saved for this mail merge.":
+            ("Gestoppt. Für diesen Serienbrief wurden keine PDFs gesichert.", "Arrêté. Aucun PDF n’a été enregistré pour ce publipostage."),
+        "The address list (Excel or CSV) must be where the letter expects it or in the same folder. Empty rows are skipped.":
+            ("Die Adressliste (Excel oder CSV) muss dort liegen, wo der Brief sie erwartet, oder im selben Ordner. Leere Zeilen werden übersprungen.", "La liste d’adresses (Excel ou CSV) doit se trouver là où la lettre l’attend ou dans le même dossier. Les lignes vides sont ignorées."),
+        "In a preset, a mail merge document becomes one PDF with all its letters.":
+            ("In einer Voreinstellung wird ein Serienbrief zu einem PDF mit allen Briefen.", "Dans un préréglage, un document de publipostage devient un seul PDF avec toutes ses lettres."),
+        "A mail merge document adds all its letters to the combined PDF.":
+            ("Ein Serienbrief fügt alle seine Briefe in das gemeinsame PDF ein.", "Un document de publipostage ajoute toutes ses lettres au PDF commun."),
+        "Word fills in one letter per row of the address list. Each letter becomes a PDF in a new folder named after the document.":
+            ("Word füllt pro Zeile der Adressliste einen Brief aus. Jeder Brief wird zu einem PDF in einem neuen Ordner mit dem Namen des Dokuments.", "Word remplit une lettre par ligne de la liste d’adresses. Chaque lettre devient un PDF dans un nouveau dossier portant le nom du document."),
+        "Word fills in one letter per row of the address list. All letters go into one PDF, each with a bookmark.":
+            ("Word füllt pro Zeile der Adressliste einen Brief aus. Alle Briefe kommen in ein PDF, jeder mit einem Lesezeichen.", "Word remplit une lettre par ligne de la liste d’adresses. Toutes les lettres vont dans un seul PDF, chacune avec un signet."),
     ]
 }
 

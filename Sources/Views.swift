@@ -142,7 +142,7 @@ struct ToolView: View {
 
     @ViewBuilder var stack: some View {
         let preview = m.activePreset != nil ? [:] : m.tool == .rename ? m.renamePreview()
-            : m.tool == .wordToPDF && !m.settings.wordCombine ? m.wordPDFNames().mapValues { $0 + ".pdf" } : [:]
+            : m.tool == .wordToPDF && !m.settings.wordCombine ? m.wordPreview() : [:]
         VStack(alignment: .leading, spacing: 14) {
             if let it = m.pageItem {
                 // List shrinks to what it needs, the page overview gets the free space
@@ -292,6 +292,8 @@ struct ToolView: View {
                 Text(it.pageSummary).font(.caption).foregroundStyle(.secondary)
             } else if usable && preset == nil && m.tool == .reorder {
                 Text(it.orderSummary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            } else if usable && preset == nil && m.tool == .wordToPDF && it.merge != nil {
+                Text(tr("Mail merge")).font(.caption).foregroundStyle(.secondary)
             }
             if preset == nil, m.tool == .rename || m.tool == .wordToPDF, usable, !it.done, let new = preview[it.id], new != it.url.lastPathComponent {
                 Image(systemName: "arrow.right").font(.caption).foregroundStyle(.secondary)
@@ -650,6 +652,8 @@ struct ToolSettingsView: View {
             }
             Text(tr("Files are added in list order. Drag to reorder or use Sort. PDF pages are added unchanged."))
                 .font(.caption).foregroundStyle(.secondary)
+            Text(tr("yymmdd in the name becomes today's date, e.g. “yymmdd-Statement” → “%@.pdf”.", withDate("yymmdd-") + tr("Statement")))
+                .font(.caption).foregroundStyle(.secondary)
         case .split:
             HStack(spacing: 14) {
                 Picker(tr("Split mode"), selection: $m.settings.splitMode) {
@@ -700,10 +704,13 @@ struct ToolSettingsView: View {
             if combine || !m.persist || m.settings.wordRule.mode == .keep {
                 Text(wordHint).font(.caption).foregroundStyle(.secondary)
             }
+            if let merge = m.mergeItems.first?.merge {
+                mergeSettings(merge, combine: combine)
+            }
         case .crop:
             HStack(spacing: 14) {
                 Picker(tr("Shape"), selection: $m.settings.cropAspect) {
-                    ForEach(CropAspect.allCases) { Text($0.title).tag($0) }
+                    ForEach(CropAspect.allCases) { Text($0.shortTitle).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
                 Spacer()
@@ -925,6 +932,55 @@ struct ToolSettingsView: View {
             Text(tr("Pictures are saved at their original resolution into a new folder. JPEGs are copied unchanged, others are saved as PNG."))
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    /// Serienbriefe: one PDF per letter or all in one, and how the letters are named
+    @ViewBuilder func mergeSettings(_ merge: WordOps.MergeInfo, combine: Bool) -> some View {
+        let fields = merge.fields
+        Divider()
+        if m.persist && !combine {
+            HStack(spacing: 10) {
+                Text(tr("Mail merge"))
+                Picker(tr("Mail merge"), selection: $m.settings.wordMerge) {
+                    ForEach(MergeOutput.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden().fixedSize()
+                if m.settings.wordMerge == .each && !merge.wholeList {
+                    Toggle(tr("Also as Word documents"), isOn: $m.settings.wordMergeDocx)
+                        .help(tr("Saves each letter also as a Word document, e.g. to change one letter later. PDFs and Word documents go into the folders “PDF” and “Word”."))
+                }
+                Spacer()
+            }
+        }
+        if m.persist {
+            HStack(spacing: 10) {
+                Text(m.settings.wordMerge == .each && !combine ? tr("File names") : tr("Bookmarks"))
+                TextField(tr("Name"), text: $m.settings.wordMergeName, prompt: Text(merge.nameExample.isEmpty ? tr("Letter") : merge.nameExample))
+                    .labelsHidden().frame(width: 220)
+                if !fields.isEmpty {
+                    Menu(tr("Insert Field")) {
+                        ForEach(fields, id: \.self) { f in
+                            Button(f) {
+                                let s = m.settings.wordMergeName
+                                m.settings.wordMergeName = s + (s.isEmpty || s.hasSuffix(" ") ? "" : " ") + "{\(f)}"
+                            }
+                        }
+                    }
+                    .fixedSize()
+                }
+                Spacer()
+            }
+        }
+        Text(mergeHint(combine: combine)).font(.caption).foregroundStyle(.secondary)
+    }
+
+    func mergeHint(combine: Bool) -> String {
+        let list = tr("The address list (Excel or CSV) must be where the letter expects it or in the same folder. Empty rows are skipped.")
+        if !m.persist { return tr("In a preset, a mail merge document becomes one PDF with all its letters.") + " " + list }
+        if combine { return tr("A mail merge document adds all its letters to the combined PDF.") + " " + list }
+        return (m.settings.wordMerge == .each
+            ? tr("Word fills in one letter per row of the address list. Each letter becomes a PDF in a new folder named after the document.")
+            : tr("Word fills in one letter per row of the address list. All letters go into one PDF, each with a bookmark.")) + " " + list
     }
 
     var wordHint: String {

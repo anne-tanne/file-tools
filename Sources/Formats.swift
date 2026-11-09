@@ -144,9 +144,16 @@ enum SplitMode: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
     var id: String { rawValue }
 }
 
+enum MergeOutput: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
+    case each = "One PDF per letter", combined = "All letters in one PDF"
+    var id: String { rawValue }
+}
+
 enum CropAspect: String, CaseIterable, Identifiable, Codable, Sendable, Titled {
     case square = "1:1", portrait = "4:5", classic = "4:3", photo = "3:2", wide = "16:9", trim = "Trim borders"
     var id: String { rawValue }
+    /// Short label for the segmented picker; segments share the width of the longest one
+    var shortTitle: String { self == .trim ? tr("Borders") : title }
     /// Long side / short side; nil for trimming
     var ratio: Double? {
         switch self {
@@ -222,6 +229,38 @@ enum PasswordMode: String, CaseIterable, Identifiable, Codable, Sendable, Titled
 }
 
 // MARK: - Files
+
+/// "yymmdd-Report" → "261102-Report": yymmdd (or JJMMTT, any case) becomes today's date
+func withDate(_ name: String) -> String {
+    let f = DateFormatter(); f.dateFormat = "yyMMdd"
+    return name.replacingOccurrences(of: "yymmdd|jjmmtt", with: f.string(from: Date()), options: [.regularExpression, .caseInsensitive])
+}
+
+/// File names for merged letters: "{Nachname} {Vorname}" filled with each letter's values. Without fields
+/// (or when they are empty) the letters are numbered: "Brief 01", "Brief 02", …
+struct LetterName {
+    let pattern: String
+
+    /// Field names in braces, in order
+    var fields: [String] {
+        let re = try! NSRegularExpression(pattern: #"\{([^{}]+)\}"#)
+        return re.matches(in: pattern, range: NSRange(pattern.startIndex..., in: pattern))
+            .compactMap { Range($0.range(at: 1), in: pattern).map { String(pattern[$0]) } }
+    }
+
+    func apply(_ values: [String: String], index: Int, count: Int, base: String) -> String {
+        var s = pattern
+        // Field names as the letter writes them may differ from the list's column names in case and "_" for spaces
+        func key(_ k: String) -> String { k.lowercased().replacingOccurrences(of: "_", with: " ") }
+        let byKey = Dictionary(values.map { (key($0.key), $0.value) }, uniquingKeysWith: { a, _ in a })
+        for f in fields { s = s.replacingOccurrences(of: "{\(f)}", with: byKey[key(f)] ?? "") }
+        s = s.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: " -_,;."))
+        let number = String(format: "%0\(max(2, String(count).count))d", index + 1)
+        if s.isEmpty { return base + " " + number }
+        return fields.isEmpty ? s + " " + number : s
+    }
+}
 
 func uniqueURL(_ dir: URL, _ base: String, _ ext: String) -> URL {
     let base = base.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")

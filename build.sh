@@ -15,7 +15,7 @@ else
     cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
 # Finder quick actions (macOS Services handled by the running app, see Services.swift)
-IMG="public.image"; PDF="com.adobe.pdf"
+IMG="public.image"; PDF="com.adobe.pdf"; FOLDER="public.folder"
 WORD="org.openxmlformats.wordprocessingml.document com.microsoft.word.doc public.rtf org.oasis-open.opendocument.text"
 SERVICES=""
 service() {   # title, message, UTIs...
@@ -29,6 +29,7 @@ service "Add Watermark with File Tools" watermark $IMG $PDF
 service "Make Searchable with File Tools" makeSearchable $PDF $IMG
 service "Recognize Text with File Tools" recognizeText $IMG $PDF
 service "Convert Word to PDF with File Tools" wordToPDF $=WORD
+service "Combine to PDF with File Tools" combine $FOLDER $PDF $IMG
 service "Run File Tools Preset…" runPreset $IMG $PDF $=WORD
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

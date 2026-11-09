@@ -50,6 +50,7 @@ enum Steps {
             }
             return Outcome(message: n == 1 ? tr("1 image in “%@”", dir.lastPathComponent) : tr("%d images in “%@”", n, dir.lastPathComponent), files: [dir])
         case .wordToPDF:
+            if let info = WordOps.mergeInfo(job.url) { return try mergeLetters(info, s, job, folder: folder, progress: progress) }
             progress(tr("Word is creating the PDF…"))
             let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("pdf")
             defer { try? FileManager.default.removeItem(at: tmp) }
@@ -145,8 +146,10 @@ enum Steps {
             progress(tr("Step %d of %d: %@", i + 1, p.steps.count, step.tool.title))
             let pages = kind == .pdf ? Array(0..<max(1, PDFDocument(url: current)?.pageCount ?? 1)) : [0]
             let stepJob = Job(id: job.id, url: current, kind: kind, pages: pages)
+            var settings = step.settings
+            settings.wordMerge = .combined   // a step hands on one file: a Serienbrief becomes one PDF with all letters
             do {
-                let o = try perform(step.tool, step.settings, stepJob, folder: tmp, progress: progress)
+                let o = try perform(step.tool, settings, stepJob, folder: tmp, progress: progress)
                 guard let out = o.files.first else { continue }
                 current = out
                 changed = true
@@ -161,5 +164,89 @@ enum Steps {
                              job.url.deletingPathExtension().lastPathComponent + " (\(p.name))", current.pathExtension)
         try fm.moveItem(at: current, to: dest)
         return Outcome(message: dest.lastPathComponent, files: [dest])
+    }
+
+    // MARK: Serienbriefe
+
+    /// One PDF per letter in a new folder named after the Serienbrief, or all letters in one PDF with a bookmark each
+    private static func mergeLetters(_ info: WordOps.MergeInfo, _ s: ToolSettings, _ job: Job, folder: URL?,
+                                     progress: @escaping @Sendable (String) -> Void) throws -> Outcome {
+        let fm = FileManager.default
+        let work = fm.temporaryDirectory.appendingPathComponent("FileTools-merge-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: work) }
+        let base = job.outName ?? job.url.deletingPathExtension().lastPathComponent
+        let naming = LetterName(pattern: s.wordMergeName)
+        let letters: [WordOps.Letter]
+        let wordFiles = s.wordMergeDocx && s.wordMerge == .each && !info.wholeList
+        do { letters = try merge(job.url, s, wordFiles: wordFiles, work: work, progress: progress) } catch is CancellationError {
+            throw ConvError(tr("Stopped. No PDFs were saved for this mail merge."))
+        }
+        let names = letters.enumerated().map { naming.apply($1.values, index: $0, count: letters.count, base: base) }
+        let dest = folder ?? job.url.deletingLastPathComponent()
+
+        if s.wordMerge == .combined || info.wholeList {
+            let tmp = work.appendingPathComponent("all.pdf")
+            let pages = try PDFOps.merge(zip(letters, names).map { ($0.url, $1) }, to: tmp)
+            if s.wordCompress {
+                progress(tr("Compressing…"))
+                _ = try Compressor.shrinkPDF(tmp, level: s.wordLevel)
+            }
+            let out = uniqueURL(dest, base, "pdf")
+            do { try fm.moveItem(at: tmp, to: out) } catch { throw ConvError(tr("Can't write to destination")) }
+            showExtension(out)
+            var parts = [out.lastPathComponent]
+            if !info.wholeList { parts.append(letters.count == 1 ? tr("1 letter") : tr("%d letters", letters.count)) }
+            parts += [pages == 1 ? tr("1 page") : tr("%d pages", pages), fmtSize(fileSize(out))]
+            return Outcome(message: parts.joined(separator: " · "), files: [out])
+        }
+
+        let dir = uniqueURL(dest, base, "")
+        // With Word documents: "Brief/PDF" and "Brief/Word", otherwise the PDFs right in "Brief"
+        let pdfDir = wordFiles ? dir.appendingPathComponent("PDF", isDirectory: true) : dir
+        let wordDir = dir.appendingPathComponent("Word", isDirectory: true)
+        do {
+            try fm.createDirectory(at: pdfDir, withIntermediateDirectories: true)
+            if wordFiles { try fm.createDirectory(at: wordDir, withIntermediateDirectories: true) }
+        } catch { throw ConvError(tr("Can't write to destination")) }
+        for (n, (letter, name)) in zip(letters, names).enumerated() {
+            if s.wordCompress {
+                progress(tr("Compressing %d of %d…", n + 1, letters.count))
+                _ = try Compressor.shrinkPDF(letter.url, level: s.wordLevel)
+            }
+            let out = uniqueURL(pdfDir, name, "pdf")
+            do {
+                try fm.moveItem(at: letter.url, to: out)
+                // Same name as its PDF
+                if let docx = letter.docx {
+                    let doc = uniqueURL(wordDir, out.deletingPathExtension().lastPathComponent, "docx")
+                    try fm.moveItem(at: docx, to: doc)
+                    showExtension(doc)
+                }
+            } catch { throw ConvError(tr("Can't write to destination")) }
+            showExtension(out)
+        }
+        return Outcome(message: letters.count == 1 ? tr("1 letter in “%@”", dir.lastPathComponent)
+                                                   : tr("%d letters in “%@”", letters.count, dir.lastPathComponent), files: [dir])
+    }
+
+    /// All letters of a Serienbrief as one PDF at `out`, a bookmark per letter (for combining several Word documents)
+    static func allLetters(_ url: URL, _ s: ToolSettings, to out: URL, progress: @escaping @Sendable (String) -> Void) throws {
+        let fm = FileManager.default
+        let work = fm.temporaryDirectory.appendingPathComponent("FileTools-merge-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: work, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: work) }
+        let naming = LetterName(pattern: s.wordMergeName)
+        let base = url.deletingPathExtension().lastPathComponent
+        let letters = try merge(url, s, work: work, progress: progress)
+        _ = try PDFOps.merge(letters.enumerated().map { ($1.url, naming.apply($1.values, index: $0, count: letters.count, base: base)) }, to: out)
+    }
+
+    private static func merge(_ url: URL, _ s: ToolSettings, wordFiles: Bool = false, work: URL,
+                              progress: @escaping @Sendable (String) -> Void) throws -> [WordOps.Letter] {
+        try WordOps.mergeLetters(url, options: WordOps.Options(final: s.wordFinal, updateFields: s.wordUpdateFields),
+                                 wordFiles: wordFiles, work: work) { n, total in
+            progress(total == 0 ? tr("Word is opening the letter…") : tr("Letter %d of %d…", n, total))
+        }
     }
 }
